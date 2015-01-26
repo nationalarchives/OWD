@@ -78,7 +78,7 @@ sub report_pages_with_insufficient_classifications {
 	}
 	foreach my $page (@{$self->{_pages}}) {
 		if ($page->num_classifications() < $min_classifications) {
-			print $page->get_zooniverse_id(), " has fewer than $min_classifications classifications (",$page->num_classifications(),")\n";
+			#print $page->get_zooniverse_id(), " has fewer than $min_classifications classifications (",$page->num_classifications(),")\n";
 			my $logging_db = $self->{_processor}->get_logging_db();
 			my $coll_log = $logging_db->get_collection('log');
 			$coll_log->insert({
@@ -96,6 +96,15 @@ sub report_pages_with_insufficient_classifications {
 			});
 		};
 	}
+}
+
+sub cluster_tags {
+	my ($self) = @_;
+	foreach my $page (@{$self->{_pages}}) {
+		if ($page->num_classifications() > 0) {
+			$page->cluster_tags();
+		}
+	}	
 }
 
 sub DESTROY {

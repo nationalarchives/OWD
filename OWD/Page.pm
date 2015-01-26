@@ -1,6 +1,7 @@
 package OWD::Page;
 use strict;
 use OWD::Classification;
+use Algorithm::ClusterPoints;
 
 sub new {
 	my ($self, $_diary, $_subject) = @_;
@@ -42,8 +43,14 @@ sub get_raw_tag_type_counts {
 }
 
 sub strip_multiple_classifications_by_single_user {
+	# More than 10,000 classifications are from users who have already classified a particular
+	# page. This method checks for this problem and tries to ensure only the best classification
+	# is preserved.
 	my ($self) = @_;
 	my %num_classifications_by;
+	my $num_classifications_before_strip = $self->num_classifications();
+	my $logging_db = $self->{_diary}{_processor}->get_logging_db();
+	my $coll_log = $logging_db->get_collection('log');
 	foreach my $classification (@{$self->{_classifications}}) {
 		$num_classifications_by{$classification->get_classification_user()}++;
 	}
@@ -51,9 +58,7 @@ sub strip_multiple_classifications_by_single_user {
 		my $value = $num_classifications_by{$user};
 		if ($value > 1) {
 			my $best_classification = "";
-			print "$user has multiple classifications for $self->{_page_data}{zooniverse_id}\n";
-			my $logging_db = $self->{_diary}{_processor}->get_logging_db();
-			my $coll_log = $logging_db->get_collection('log');
+			#print "$user has multiple classifications for $self->{_page_data}{zooniverse_id}\n";
 			$coll_log->insert({
 				'diary'			=> {
 					'group_id'		=> $self->{_diary}->get_zooniverse_id(),
@@ -102,8 +107,24 @@ sub strip_multiple_classifications_by_single_user {
 				}
 			} 
 			$self->{_classifications} = $replacement_classifications;
-			print "", $self->get_page_num(), " has ", scalar @{$self->{_classifications}}, " classifications after de-duping\n";
 		}
+	}
+	my $num_classifications_after_strip = $self->num_classifications();
+	if ($num_classifications_before_strip > $num_classifications_after_strip) {
+		my $diff = $num_classifications_before_strip - $num_classifications_after_strip;
+		$coll_log->insert({
+			'diary'			=> {
+				'group_id'		=> $self->{_diary}->get_zooniverse_id(),
+				'docref'		=> $self->{_diary}->get_docref(),
+				'iaid'			=> $self->{_diary}->get_iaid(),
+			},
+			'page'			=> {
+				'subject_id'	=> $self->get_zooniverse_id(),
+				'page_num'		=> $self->get_page_num(),
+			},
+			'type'				=> "some_classifications_inadmissable",
+			'detail'			=> "$diff / $num_classifications_before_strip",
+		});
 	}
 }
 
@@ -131,6 +152,24 @@ sub get_page_num {
 sub num_classifications {
 	my ($self) = @_;
 	return scalar @{$self->{_classifications}};
+}
+
+sub cluster_tags {
+	my ($self) = @_;
+	my $annotations_by_type = {}; # store annotations by type for the main clustering routine
+	# ^ destroy this circular ref when the page is destroyed
+	# create a first cluster of doctypes, then go through the other classifications
+	foreach my $classification (@{$self->{_classifications}}) {
+		push @{$annotations_by_type->{doctype}{$classification->get_doctype()}}, $classification;
+		my $annotations_by_type_this_classification = $classification->get_annotations_by_type();
+		while (my ($type, $annotations) = each %{$annotations_by_type_this_classification}) {
+			push @{$annotations_by_type->{$type}}, @$annotations;
+		}
+	}
+	while (my ($type,$annotations) = each %{$annotations_by_type}) {
+		undef;
+	}
+	undef;
 }
 
 sub DESTROY {

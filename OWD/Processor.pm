@@ -70,6 +70,7 @@ sub get_diary {
 	if (!defined $id) {
 		# in this case return diaries in sequence each time the get_diary function is called.
 		# presumably we need to keep track of the last returned diary so that we don't return the same diary again
+		#print "\$group_iterator = $group_iterator\n";
 		if ($group_iterator < @$groups_ref) {
 			my $group = $groups_ref->[$group_iterator++];
 			return OWD::Diary->new($self,$group);
@@ -80,7 +81,10 @@ sub get_diary {
 	}
 	elsif ($id =~ m|^GWD|) {
 		# OWD Groups (diaries) begin "GWD", in this case return the specific requested diary
-		croak "Not implemented!";
+		foreach my $group (@$groups_ref) {
+			return OWD::Diary->new($self,$group) if $group->{zooniverse_id} eq $id;
+		}
+		croak "Diary with ID '$id' not found";
 	}
 	elsif ($id =~ m|^C|) {
 		# TNA IAIDs (in the case of war diaries) begin with a C, in this case return the specific diary

@@ -23,15 +23,19 @@ $owd->set_logging_db($logging_db);
 my $total_raw_tag_counts;
 my $diary_count = 0;
 while (my $diary = $owd->get_diary()) {
+#my $diary = $owd->get_diary("GWD0000001");
+#{
 	$diary_count++;
 	print "$diary_count: ",$diary->get_docref(),"\n";
 	my $num_pages_with_classifications = $diary->load_classifications();
 	if ($diary->get_status() eq "complete") {
 		$diary->strip_multiple_classifications_by_single_user();
 		$diary->report_pages_with_insufficient_classifications();
+		$diary->cluster_tags();
+
 		my $tag_types = {};
 		my $diary_raw_tag_type_counts = $diary->get_raw_tag_type_counts();
-		for (my ($type,$count) = each %$diary_raw_tag_type_counts) {
+		while (my ($type,$count) = each %$diary_raw_tag_type_counts) {
 			$total_raw_tag_counts->{$type} += $count;
 		}
 	}
@@ -44,5 +48,5 @@ foreach my $val (values %$total_raw_tag_counts) {
 }
 
 foreach my $key (reverse sort {$total_raw_tag_counts->{$a} <=> $total_raw_tag_counts->{$b}} keys %$total_raw_tag_counts) {
-	print "$key\t",int( ( $total_raw_tag_counts->{$key} / $total_tags )*100), "%\n";
+	print "$key\t",int( ( $total_raw_tag_counts->{$key} / $total_tags )*100), "% ($total_raw_tag_counts->{$key})\n";
 }

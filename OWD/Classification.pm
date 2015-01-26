@@ -75,6 +75,22 @@ sub get_updated_at {
 	my ($self) = @_;
 	return $self->{_classification_data}{updated_at};
 }
+
+sub get_doctype {
+	my ($self) = @_;
+	return $self->{_classification_data}{doctype};
+}
+
+sub get_annotations_by_type {
+	my ($self) = @_;
+	my $annotations_by_type = {};
+	foreach my $annotation (@{$self->{_annotations}}) {
+		push @{$annotations_by_type->{$annotation->get_type()}}, $annotation;
+	}
+	return $annotations_by_type;
+	# ensure this reference is destroyed to prevent memory leak
+}
+
 sub DESTROY {
 	my ($self) = @_;
 	foreach my $annotation (@{$self->{_annotations}}) {
