@@ -93,4 +93,22 @@ sub get_diary {
 	# fetch the relevant group object and call the OWD::Diary constructor to create a diary object for it, then return the
 	# object to the caller
 }
+
+sub get_key_with_most_array_elements {
+	my ($class, $annotations) = @_;
+	my $return_val = {};
+	foreach my $value (keys %$annotations) {
+		my $score = @{$annotations->{$value}};
+		if (!defined $return_val->{score} || $return_val->{score} == $score) {
+			$return_val->{score} = $score;
+			push @{$return_val->{value}}, $value;
+		}
+		elsif ($return_val->{score} < $score) {
+			$return_val->{score} = $score;
+			$return_val->{value} = [$value];
+		}
+	}
+	return $return_val;
+}
+
 1;

@@ -8,11 +8,17 @@ sub new {
 	my @_annotations;
 	my $classification_obj = bless {}, $self;
 	foreach my $annotation (@{$_classification->{annotations}}) {
-		# Only create annotation objects for the tags that have x/y co-ords. The other bits that Zooniverse are putting
-		# into Annotation tags have only one value per volunteer per page, so I've moved them into the Classification object.
+		# if the annotation type is "document", create an OWD::Annotation object out of it
+		# by rearranging it into a more Annotation-like structure
 		if (defined $annotation->{document}) {
-			$_classification->{doctype} = $annotation->{document};
+			$annotation->{type} = 'doctype';
+			$annotation->{note} = $annotation->{document};
+			$annotation->{coords} = [0,0];
+			delete $annotation->{document};
+			push @_annotations, OWD::Annotation->new($classification_obj,$annotation);
 		}
+		# for other non-coordinate annotations, push them into the classification metadata
+		# as they aren't really volunteer defined anyway
 		elsif (defined $annotation->{finished_at}) {
 			$_classification->{finished_at} = $annotation->{finished_at};
 		}

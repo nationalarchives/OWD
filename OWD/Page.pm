@@ -2,6 +2,7 @@ package OWD::Page;
 use strict;
 use OWD::Classification;
 use Algorithm::ClusterPoints;
+use Data::Dumper;
 
 sub new {
 	my ($self, $_diary, $_subject) = @_;
@@ -160,13 +161,58 @@ sub cluster_tags {
 	# ^ destroy this circular ref when the page is destroyed
 	# create a first cluster of doctypes, then go through the other classifications
 	foreach my $classification (@{$self->{_classifications}}) {
-		push @{$annotations_by_type->{doctype}{$classification->get_doctype()}}, $classification;
+		#push @{$annotations_by_type->{doctype}{$classification->get_doctype()}}, $classification;
 		my $annotations_by_type_this_classification = $classification->get_annotations_by_type();
 		while (my ($type, $annotations) = each %{$annotations_by_type_this_classification}) {
 			push @{$annotations_by_type->{$type}}, @$annotations;
 		}
 	}
-	while (my ($type,$annotations) = each %{$annotations_by_type}) {
+	foreach my $type (keys %$annotations_by_type) {
+		my $annotations = $annotations_by_type->{$type};
+		# Use separate tolerances for diaryDate co-ordinates as some users were ensuring that
+		# the ruler correctly divided entries, while others were tagging the precise location
+		# of the date entry. Both are right, but those who used the ruler method will produce
+		# more accurate results.
+		my $clp;
+		if ($type eq 'diaryDate') {
+			$clp = Algorithm::ClusterPoints->new(
+						dimension		=> 2,
+						radius			=> 20.0,
+						minimum_size 	=> 1,
+						scales			=> [1,4],
+			);
+		}
+		else {
+			$clp = Algorithm::ClusterPoints->new(
+						dimension		=> 2,
+						radius			=> 4.0,
+						minimum_size 	=> 1,
+						scales			=> [1,2],
+			);
+		}
+		if ($type eq "doctype") {
+			# treat this annotation type separately as it doesn't have co-ordinates and 
+			# only occurs once per user per page.
+			#my $consensus_key = OWD::Processor->get_key_with_most_array_elements($annotations);
+			push @{$self->{_clusters}}, $annotations_by_type->{$type};
+			undef;
+		}
+		else {
+			# We have filtered the options by type, now we should be confident enough to
+			# cluster by co-ordinate, then for each cluster, check if the note field is close enough
+			foreach my $annotation (@{$annotations}) {
+				$clp->add_point(@{$annotation->{_annotation_data}{coords}});
+			}
+			my @clusters = $clp->clusters_ix;
+			foreach my $cluster (@clusters) {
+				my $this_cluster;
+				foreach my $annotation_number (@{$cluster}) {
+					push @{$this_cluster}, $annotations->[$annotation_number];
+				}
+				push @{$self->{_clusters}}, $this_cluster;
+			}
+			undef;
+		}
 		undef;
 	}
 	undef;

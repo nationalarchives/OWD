@@ -104,6 +104,7 @@ sub cluster_tags {
 		if ($page->num_classifications() > 0) {
 			$page->cluster_tags();
 		}
+		undef;
 	}	
 }
 
