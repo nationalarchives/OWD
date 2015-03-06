@@ -7,6 +7,12 @@ sub new {
 	my ($self, $_page, $_classification) = @_;
 	my @_annotations;
 	my $classification_obj = bless {}, $self;
+
+	if (!defined $_classification->{user_name}) { # Ensure every classification has a user_name
+		$_classification->{user_name} = "<anonymous>-$_classification->{user_ip}";
+	}
+	
+	$classification_obj->{_num_annotations} = 0;
 	foreach my $annotation (@{$_classification->{annotations}}) {
 		# if the annotation type is "document", create an OWD::Annotation object out of it
 		# by rearranging it into a more Annotation-like structure
@@ -15,11 +21,13 @@ sub new {
 			$annotation->{note} = $annotation->{document};
 			$annotation->{coords} = [0,0];
 			delete $annotation->{document};
-			push @_annotations, OWD::Annotation->new($classification_obj,$annotation);
 		}
-		# for other non-coordinate annotations, push them into the classification metadata
+		$annotation->{id} = $_classification->{subjects}[0]{zooniverse_id}.'_'.$_classification->{user_name}.'_'.$annotation->{coords}[0].'_'.$annotation->{coords}[1];
+		$classification_obj->{_num_annotations}++;
+
+		# for non-coordinate annotations, push them into the classification metadata
 		# as they aren't really volunteer defined anyway
-		elsif (defined $annotation->{finished_at}) {
+		if (defined $annotation->{finished_at}) {
 			$_classification->{finished_at} = $annotation->{finished_at};
 		}
 		elsif (defined $annotation->{user_agent}) {
@@ -30,10 +38,6 @@ sub new {
 		}
 	}
 	delete $_classification->{annotations}; # separate the individual annotations from the classification object
-	
-	if (!defined $_classification->{user_name}) { # Ensure every classification has a user_name
-		$_classification->{user_name} = "<anonymous>-$_classification->{user_ip}";
-	}
 	
 	$classification_obj->{_page} = $_page;
 	$classification_obj->{_classification_data} = $_classification;

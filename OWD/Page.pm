@@ -3,6 +3,7 @@ use strict;
 use OWD::Classification;
 use Algorithm::ClusterPoints;
 use Data::Dumper;
+use Text::LevenshteinXS;
 
 sub new {
 	my ($self, $_diary, $_subject) = @_;
@@ -157,16 +158,30 @@ sub num_classifications {
 
 sub cluster_tags {
 	my ($self) = @_;
-	my $annotations_by_type = {}; # store annotations by type for the main clustering routine
-	# ^ destroy this circular ref when the page is destroyed
-	# create a first cluster of doctypes, then go through the other classifications
-	foreach my $classification (@{$self->{_classifications}}) {
-		#push @{$annotations_by_type->{doctype}{$classification->get_doctype()}}, $classification;
-		my $annotations_by_type_this_classification = $classification->get_annotations_by_type();
-		while (my ($type, $annotations) = each %{$annotations_by_type_this_classification}) {
-			push @{$annotations_by_type->{$type}}, @$annotations;
-		}
+	# create a data structure of annotations, grouped first by type, then by user
+	# For each tag type, use the annotations by the user with the most contributions for that
+	# tag type to create a skeleton cluster layout, then try to match the tags of this type
+	# from other users to these clusters.
+	my $annotations_by_type_and_user = $self->get_annotations_by_type_and_user();
+	foreach my $user (keys %{$annotations_by_type_and_user->{doctype}}) {
+		push @{$self->{_clusters}}, $annotations_by_type_and_user->{doctype}{$user}[0];
 	}
+	foreach my $type (keys %$annotations_by_type_and_user) {
+		next if $type eq 'doctype';
+		# for this tag type, who has the most tags. Use their tags to create the skeleton cluster layout
+		
+		undef;
+	}
+	undef;
+}
+
+sub cluster_tags_using_cluster_algorithm {
+	# separating annotations that have been too aggressively clustered is REALLY complicated. Going
+	# back to previous clustering algorithm
+	# DELETE THIS?
+	my ($self) = @_;
+	my $annotations_by_type = $self->get_annotations_by_type(); # store annotations by type for the main clustering routine
+	# ^ destroy this circular ref when the page is destroyed
 	foreach my $type (keys %$annotations_by_type) {
 		my $annotations = $annotations_by_type->{$type};
 		# Use separate tolerances for diaryDate co-ordinates as some users were ensuring that
@@ -185,17 +200,16 @@ sub cluster_tags {
 		else {
 			$clp = Algorithm::ClusterPoints->new(
 						dimension		=> 2,
-						radius			=> 4.0,
+						radius			=> 24.0,
 						minimum_size 	=> 1,
-						scales			=> [1,2],
+						scales			=> [2,7],
 			);
 		}
 		if ($type eq "doctype") {
 			# treat this annotation type separately as it doesn't have co-ordinates and 
 			# only occurs once per user per page.
 			#my $consensus_key = OWD::Processor->get_key_with_most_array_elements($annotations);
-			push @{$self->{_clusters}}, $annotations_by_type->{$type};
-			undef;
+			push @{$self->{_clusters}{doctype}}, $annotations_by_type->{$type};
 		}
 		else {
 			# We have filtered the options by type, now we should be confident enough to
@@ -209,13 +223,92 @@ sub cluster_tags {
 				foreach my $annotation_number (@{$cluster}) {
 					push @{$this_cluster}, $annotations->[$annotation_number];
 				}
-				push @{$self->{_clusters}}, $this_cluster;
+				push @{$self->{_clusters}{$type}}, $this_cluster;
+			}
+		}
+		# Once we have an initial set of clusters, check for any annotations that
+		# have been too aggressively clustered, and move annotations between clusters
+		# as appropriate.
+		$self->_tidy_clusters();
+	}
+}
+
+sub _tidy_clusters {
+	# This was needed to deal with aggressively clustered annotations when using the ClusterPoints
+	# algorithm. DELETE THIS
+	my ($self) = @_;
+	# Check the annotations in each cluster to see if the same user has more than one annotation
+	# If so, chances are we've clustered two entities together by being too lenient on x/y coords.
+	# Review each annotation in the cluster, calculating its distance and "similarity" to other
+	# annotations in the cluster (or nearby annotations from any cluster?), then optimise the clusters
+	# by moving annotations between clusters.
+	foreach my $type (keys %{$self->{_clusters}}) {
+		next if $type eq 'doctype';
+		foreach my $cluster (@{$self->{_clusters}{$type}}) {
+			my $cluster_annotations_per_user;
+			foreach (my $annotation_number = 0; $annotation_number < @$cluster; $annotation_number++) {
+				my $annotation = $cluster->[$annotation_number];
+				my $user = $annotation->get_classification()->get_classification_user();
+				push @{$cluster_annotations_per_user->{$user}},$annotation_number;
+			}
+			foreach my $user (keys %$cluster_annotations_per_user) {
+				if (@{$cluster_annotations_per_user->{$user}} > 1) {
+					my @separate_entities;
+					foreach my $annotation_number (@{$cluster_annotations_per_user->{$user}}) {
+						push @separate_entities, $cluster->[$annotation_number]->get_coordinates()
+					}
+					my $shortest_distance = get_shortest_distance_between_points(\@separate_entities);
+					undef;
+				}
 			}
 			undef;
 		}
-		undef;
 	}
-	undef;
+}
+
+sub get_shortest_distance_between_points {
+	my ($points) = @_;
+	my @distances;
+	for (my $i=0; $i<@$points-1; $i++) {
+		for (my $j = $i+1; $j < @$points; $j++) {
+			push @distances, 
+				sqrt( (($points->[$i][0] - $points->[$j][0])^2)
+					+(($points->[$i][1] - $points->[$j][1])^2) );
+		}
+	}
+	return (sort @distances)[0];
+}
+
+sub get_annotations_by_type {
+	my ($self) = @_;
+	my $annotations_by_type = {};
+	foreach my $classification (@{$self->{_classifications}}) {
+		#push @{$annotations_by_type->{doctype}{$classification->get_doctype()}}, $classification;
+		my $annotations_by_type_this_classification = $classification->get_annotations_by_type();
+		while (my ($type, $annotations) = each %{$annotations_by_type_this_classification}) {
+			push @{$annotations_by_type->{$type}}, @$annotations;
+		}
+	}
+	return $annotations_by_type;
+}
+
+sub get_annotations_by_type_and_user {
+	my ($self) = @_;
+	my $annotations_by_type = {};
+	foreach my $classification (@{$self->{_classifications}}) {
+		my $user = $classification->get_classification_user();
+		my $annotations_by_type_this_classification = $classification->get_annotations_by_type();
+		foreach my $type (keys %$annotations_by_type_this_classification) {
+			$annotations_by_type->{$type}{$user} = $annotations_by_type_this_classification->{$type};
+		}
+	}
+	return $annotations_by_type;
+}
+
+sub find_similar_nearby_tags {
+
+	my ($self, $type, $centre) = @_;
+	#my $annotations_by_type = 
 }
 
 sub DESTROY {

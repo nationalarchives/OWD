@@ -17,6 +17,16 @@ sub get_type {
 	return $self->{_annotation_data}{type};
 }
 
+sub get_classification {
+	my ($self) = @_;
+	return $self->{_classification};
+}
+
+sub get_coordinates {
+	my ($self) = @_;
+	return $self->{_annotation_data}{coords};
+}
+
 sub DESTROY {
 	my ($self) = @_;
 	$self->{_classification} = undef;
