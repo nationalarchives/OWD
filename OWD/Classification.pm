@@ -12,6 +12,8 @@ sub new {
 		$_classification->{user_name} = "<anonymous>-$_classification->{user_ip}";
 	}
 	
+	$classification_obj->{_page} = $_page;
+	$classification_obj->{_classification_data} = $_classification;
 	$classification_obj->{_num_annotations} = 0;
 	foreach my $annotation (@{$_classification->{annotations}}) {
 		# if the annotation type is "document", create an OWD::Annotation object out of it
@@ -34,13 +36,14 @@ sub new {
 			$_classification->{user_agent} = $annotation->{user_agent};
 		}
 		else {
-			push @_annotations, OWD::Annotation->new($classification_obj,$annotation);
+			my $obj_annotation = OWD::Annotation->new($classification_obj,$annotation);
+			if (ref($obj_annotation) eq 'OWD::Annotation') {
+				push @_annotations, OWD::Annotation->new($classification_obj,$annotation);
+			}
 		}
 	}
 	delete $_classification->{annotations}; # separate the individual annotations from the classification object
 	
-	$classification_obj->{_page} = $_page;
-	$classification_obj->{_classification_data} = $_classification;
 	$classification_obj->{_annotations} = \@_annotations;
 	return $classification_obj;
 }
@@ -57,6 +60,21 @@ sub get_tag_type_counts {
 sub get_classification_user {
 	my ($self) = @_;
 	return $self->{_classification_data}{user_name};
+}
+
+sub get_page {
+	my ($self) = @_;
+	return $self->{_page};
+}
+
+sub data_error {
+	my ($self, $error_hash) = @_;
+	if (!defined $error_hash->{classification}) {
+		$error_hash->{classification} = {
+			'user_name'		=>  $self->get_classification_user(),
+		};
+	}
+	$self->{_page}->data_error($error_hash);
 }
 
 sub compare_classifications {
@@ -101,10 +119,16 @@ sub get_annotations_by_type {
 	# ensure this reference is destroyed to prevent memory leak
 }
 
+
 sub DESTROY {
 	my ($self) = @_;
 	foreach my $annotation (@{$self->{_annotations}}) {
-		$annotation->DESTROY();
+		if (ref($annotation) eq 'OWD::Annotation') {
+			$annotation->DESTROY();
+		}
+		else {
+			undef;
+		}
 	}
 	$self->{_page} = undef;
 }

@@ -151,6 +151,11 @@ sub get_page_num {
 	return $self->{_page_data}{metadata}{page_number};
 }
 
+sub get_diary {
+	my ($self) = @_;
+	return $self->{_diary};
+}
+
 sub num_classifications {
 	my ($self) = @_;
 	return scalar @{$self->{_classifications}};
@@ -164,15 +169,188 @@ sub cluster_tags {
 	# from other users to these clusters.
 	my $annotations_by_type_and_user = $self->get_annotations_by_type_and_user();
 	foreach my $user (keys %{$annotations_by_type_and_user->{doctype}}) {
-		push @{$self->{_clusters}}, $annotations_by_type_and_user->{doctype}{$user}[0];
+		push @{$self->{_clusters}{doctype}}, $annotations_by_type_and_user->{doctype}{$user}[0];
 	}
 	foreach my $type (keys %$annotations_by_type_and_user) {
 		next if $type eq 'doctype';
 		# for this tag type, who has the most tags. Use their tags to create the skeleton cluster layout
-		
-		undef;
+		my $user_annotations_by_type_popularity = _num_tags_of_type($annotations_by_type_and_user->{$type});
+		my $first_user_for_this_type = 1;
+		foreach my $num_annotations (reverse sort {$a <=> $b} keys %$user_annotations_by_type_popularity) {
+			foreach my $username (keys %{$user_annotations_by_type_popularity->{$num_annotations}}) {
+				if ($first_user_for_this_type) {
+					# This is the top user for the tag type, so create a new cluster for each of their tags
+					foreach my $annotation (@{$user_annotations_by_type_popularity->{$num_annotations}{$username}}) {
+						push @{$self->{_clusters}{$type}}, [$annotation];
+					}
+					$first_user_for_this_type = 0;
+				}
+				else {
+					foreach my $annotation (@{$user_annotations_by_type_popularity->{$num_annotations}{$username}}) {
+						$self->_match_annotation_against_existing($annotation);
+					}
+				}
+			}
+		}
 	}
 	undef;
+}
+
+sub _match_annotation_against_existing {
+	my ($self, $new_annotation) = @_;
+	# for each cluster fpr this type so far, try matching new tag to it
+	# if they have the same user, reject
+	# find the nearest tag that meets "similarity" requirements. If there aren't any, start a new cluster.
+	my $type = $new_annotation->get_type();
+	my $annotation_distance_from_cluster;
+	for (my $cluster_num = 0; $cluster_num <  @{$self->{_clusters}{$type}}; $cluster_num++) {
+		# check for location +/- 9?
+		# check for similarity
+		$annotation_distance_from_cluster->[$cluster_num] = distance($new_annotation->get_coordinates(),$self->{_clusters}{$type}[$cluster_num][0]->get_coordinates());
+	}
+	
+	undef;
+
+=for
+	my $potential_matching_clusters;
+	# check each existing cluster that we've found so far
+	for (my $next_cluster = 0; $next_cluster < @$clustered_tags; $next_cluster++) {
+		my $cluster = $clustered_tags->[$next_cluster];
+		next if defined $cluster->[0]{document};
+		# skip this cluster if its type is different than the new tag
+		next if $cluster->[0]{type} ne $new_tag->{type};
+		# skip this cluster if the contributor of $new_tag already has a tag in the cluster
+		next if _already_has_tag_in_cluster($cluster,$new_tag->{user_name});
+		# check if the new tag is "close" to at least one of the tags in the cluster.
+		my $shortest_distance_to_cluster_member;
+		foreach my $clustered_tag (@$cluster) {
+			my $distance = _acceptable_cluster_distance($clustered_tag,$new_tag); 
+			if ( defined $distance ) {
+				if (!defined $shortest_distance_to_cluster_member || $distance < $shortest_distance_to_cluster_member) {
+					$shortest_distance_to_cluster_member = $distance;
+				}
+			}
+		}
+		# if $shortest_distance_to_cluster_member is not defined, the current tag and current cluster
+		# do not meet proximity requirements
+		next if !defined $shortest_distance_to_cluster_member;
+
+		if ($new_tag->{type} eq "diaryDate") {
+#			if ($new_tag->{note} ne $cluster->[0]{note}) {
+#				next;
+#			}
+		}
+		elsif ($new_tag->{type} eq "time") {
+			if ($new_tag->{note} ne $cluster->[0]{note}) {
+				next;
+			}
+		}
+		elsif ($new_tag->{type} eq "person") {
+			# TODO: Is it sufficient to do a fuzzy match against one of the clustered value
+			# rather than all of them?
+			if (length($new_tag->{note}{surname}) < 3) {
+				if (Text::LevenshteinXS::distance($new_tag->{note}{surname},$cluster->[0]{note}{surname}) > 0) {
+					next;
+				}
+			}
+			else {
+				my $ls_diff = Text::LevenshteinXS::distance($new_tag->{note}{surname},$cluster->[0]{note}{surname});
+				if ( $ls_diff > length($new_tag->{note}{surname})/2) {
+					next;
+				}
+			}
+		}
+		elsif ($new_tag->{type} eq "casualties") {
+			# no special effort required, usually only recorded once per page
+		}
+		elsif ($new_tag->{type} eq "mapRef") {
+			# no special effort required, too complicated to cluster on more than coord and type
+		}
+		elsif ($new_tag->{type} eq "weather") {
+			# don't bother with weather clustering, the tags are sufficiently rare
+		}
+		elsif ($new_tag->{type} eq "activity") {
+			if ($new_tag->{note} ne $cluster->[0]{note}) {
+				next;
+			}
+		}
+		elsif ($new_tag->{type} eq "place") {
+			# TODO: Is it sufficient to do a fuzzy match against one of the clustered value
+			# rather than all of them?
+			if (length($new_tag->{note}{place}) < 3) {
+				if (Text::LevenshteinXS::distance($new_tag->{note}{place},$cluster->[0]{note}{place}) > 0) {
+					next;
+				}
+			}
+			else {
+				my $ls_diff = Text::LevenshteinXS::distance($new_tag->{note}{place},$cluster->[0]{note}{place});
+				if ( $ls_diff > (length(_shorter_string($new_tag->{note}{place},$cluster->[0]{note}{place}))/2)+1) {
+					next;
+				}
+			}
+		}
+		elsif ($new_tag->{type} eq "domestic") {
+			if ($new_tag->{note} ne $cluster->[0]{note}) {
+				next;
+			}
+		}
+		elsif ($new_tag->{type} eq "unit") {
+			# TODO: Is it sufficient to do a fuzzy match against one of the clustered value
+			# rather than all of them?
+			my $ls_diff = Text::LevenshteinXS::distance($new_tag->{note}{name},$cluster->[0]{note}{name});
+			if ( $ls_diff > length($new_tag->{note}{name})/2) {
+				next;
+			}
+		}
+		elsif ($new_tag->{type} eq "date") {
+			if ($new_tag->{note} ne $cluster->[0]{note}) {
+				next;
+			}
+		}
+		elsif ($new_tag->{type} eq "reference") { # reference will be a bitch to cluster, looks like a free-for-all free-text field
+			# don't bother trying to cluster reference on anything other than coord and type
+		}
+		elsif ($new_tag->{type} eq "gridRef") { # gridRef will be a bitch to cluster, looks like a free-for-all free-text field
+			# don't bother trying to cluster reference on anything other than coord and type
+		}
+		else {
+			print "CLUSTERERROR: Dunno how to cluster $new_tag->{type}\n" if $debug > 2; next;
+			undef: #dunno what to do here!
+		}
+		push @$potential_matching_clusters, {
+			"cluster"			=> $next_cluster,
+			"nearest_member"	=> $shortest_distance_to_cluster_member,
+		};
+	}
+	if (defined $potential_matching_clusters) {
+		# we've found at least one tag match
+		my $matching_cluster_num = _select_nearest_matching_cluster($potential_matching_clusters);
+		push @{$clustered_tags->[$matching_cluster_num]}, $new_tag;
+	}
+	else {
+		# if we get to here, then there was no matching existing cluster.  Start a new one.
+		push @$clustered_tags, [$new_tag];
+	}
+=cut
+}
+
+sub acceptable_distance {
+	my () = @_;
+}
+
+sub distance {
+	my ($coord1,$coord2) = @_;
+	return sqrt( ( ($coord1->[0] - $coord2->[0])^2 ) + ( ($coord1->[0] - $coord2->[1])^2) );
+}
+
+sub _num_tags_of_type {
+	my ($annotations_grouped_by_user) = shift;
+	my $user_annotations_by_num_uses;
+	foreach my $user (keys %$annotations_grouped_by_user) {
+		my $num_tags_for_user = @{$annotations_grouped_by_user->{$user}};
+		$user_annotations_by_num_uses->{$num_tags_for_user}{$user} = $annotations_grouped_by_user->{$user};
+	}
+	return $user_annotations_by_num_uses;
 }
 
 sub cluster_tags_using_cluster_algorithm {
@@ -309,6 +487,17 @@ sub find_similar_nearby_tags {
 
 	my ($self, $type, $centre) = @_;
 	#my $annotations_by_type = 
+}
+
+sub data_error {
+	my ($self, $error_hash) = @_;
+	if (!defined $error_hash->{page}) {
+		$error_hash->{page} = {
+			'subject_id'		=> $self->get_zooniverse_id(),
+			'page_number'		=> $self->get_page_num(),
+		};
+	}
+	$self->{_diary}->data_error($error_hash);
 }
 
 sub DESTROY {

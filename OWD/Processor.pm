@@ -65,6 +65,12 @@ sub get_logging_db {
 	return $self->{logging_database};
 }
 
+sub get_error_collection {
+	my ($self) = @_;
+	my $log_db = $self->get_logging_db();
+	return $log_db->get_collection('error');
+}
+
 sub get_diary {
 	my ($self, $id) = @_;
 	if (!defined $id) {
@@ -109,6 +115,11 @@ sub get_key_with_most_array_elements {
 		}
 	}
 	return $return_val;
+}
+
+sub data_error {
+	my ($self,$error_hash) = @_;
+	$self->get_error_collection->insert($error_hash);
 }
 
 1;

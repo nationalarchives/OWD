@@ -108,6 +108,18 @@ sub cluster_tags {
 	}	
 }
 
+sub data_error {
+	my ($self, $error_hash) = @_;
+	if (!defined $error_hash->{diary}) {
+		$error_hash->{diary} = {
+			'group_id'			=> $self->get_zooniverse_id(),
+			'iaid'				=> $self->get_iaid(),
+			'docref'			=> $self->get_docref(),
+		};
+	}
+	$self->{_processor}->data_error($error_hash);
+}
+
 sub DESTROY {
 	my ($self) = @_;
 	foreach my $page (@{$self->{_pages}}) {
