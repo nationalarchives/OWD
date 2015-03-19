@@ -9,8 +9,8 @@ my $group_iterator = 0; # keep track of the next diary in the array of diaries t
 my $groups_ref = [];	# holds an array of groups (diaries) which can be iterated by index number
 
 sub new {
-	my ($self) = @_;
-	return bless {}, $self;
+	my ($class) = @_;
+	return bless {}, $class;
 }
 
 sub set_database {

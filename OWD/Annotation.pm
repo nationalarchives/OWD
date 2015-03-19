@@ -108,6 +108,9 @@ sub new {
 			}
 			if ($obj->{_annotation_data}{type} ne 'doctype') {
 				$data_has_been_modified = $obj->_fix_known_errors();
+				if ($data_has_been_modified) {
+					undef;
+				}
 			}
 		} until ($data_has_been_modified == 0);
 		return $obj;
@@ -139,6 +142,57 @@ sub get_coordinates {
 sub get_id {
 	my ($self) = @_;
 	return $self->{_annotation_data}{id};
+}
+
+sub get_string_value {
+	my ($self) = @_;
+	my $string_value;
+	if ($self->{_annotation_data}{type} eq 'place') {
+		$string_value = $self->{_annotation_data}{standardised_note}{place};
+	}
+	elsif ($self->{_annotation_data}{type} eq 'person') {
+		if ($self->{_annotation_data}{standardised_note}{first} ne '') {
+			$string_value = $self->{_annotation_data}{standardised_note}{first};
+		}
+		if ($self->{_annotation_data}{standardised_note}{surname} ne '') {
+			if ($string_value ne '') {
+				$string_value .= ' ';
+			}
+			$string_value .= $self->{_annotation_data}{standardised_note}{surname};
+		}
+		
+	}
+	elsif ($self->{_annotation_data}{type} eq 'reference') {
+		$string_value = $self->{_annotation_data}{standardised_note}{reference};
+	}
+	elsif ($self->{_annotation_data}{type} eq 'casualties') {
+		$string_value = "died: $self->{_annotation_data}{standardised_note}{died}\nkilled: $self->{_annotation_data}{standardised_note}{killed}\nmissing: $self->{_annotation_data}{standardised_note}{missing}\nprisoner: $self->{_annotation_data}{standardised_note}{prisoner}\nsick: $self->{_annotation_data}{standardised_note}{sick}\nwounded: $self->{_annotation_data}{standardised_note}{wounded}\n";
+	}
+	elsif ($self->{_annotation_data}{type} eq 'unit') {
+		$string_value = $self->{_annotation_data}{standardised_note}{name};
+	}
+	elsif ($self->{_annotation_data}{type} eq 'mapRef') {
+		$string_value = $self->{_annotation_data}{standardised_note}{sheet};
+	}
+	elsif ($self->{_annotation_data}{type} eq 'gridRef') {
+		$string_value = $self->{_annotation_data}{standardised_note}{gridref_a}.'_'.$self->{_annotation_data}{standardised_note}{gridref_b}.'_'.$self->{_annotation_data}{standardised_note}{gridref_c}.'_'.$self->{_annotation_data}{standardised_note}{gridref_d}.'_'.$self->{_annotation_data}{standardised_note}{gridref_e};
+	}
+	elsif ($self->{_annotation_data}{type} eq 'diaryDate'
+			|| $self->{_annotation_data}{type} eq 'activity'
+			|| $self->{_annotation_data}{type} eq 'time'
+			|| $self->{_annotation_data}{type} eq 'domestic'
+			|| $self->{_annotation_data}{type} eq 'weather'
+			|| $self->{_annotation_data}{type} eq 'date'
+			|| $self->{_annotation_data}{type} eq 'title'
+			|| $self->{_annotation_data}{type} eq 'orders'
+			|| $self->{_annotation_data}{type} eq 'signals') {
+		$string_value = $self->{_annotation_data}{standardised_note};
+	}
+	else {
+		undef;
+	}
+	undef;
+	return $string_value;
 }
 
 sub _standardise_punctuation {
@@ -294,6 +348,12 @@ sub _data_consistent {
 				return 0;
 			}
 			if ($annotation->{note} !~ /^\d{1,2} [a-z]{3} \d{4}$/i) {
+				my $error = {
+					'type'		=> 'annotation_error; invalid diaryDate format',
+					'detail'	=> '\''.$annotation->{note}.'\' doesn\'t match expected date format \'dd mmmm yyyy\'',
+				};
+				$self->data_error($error);
+				return 0;
 				undef;
 			}
 		}
@@ -308,6 +368,12 @@ sub _data_consistent {
 				return 0;
 			}
 			if ($annotation->{note} !~ /^\d{1,2} [a-z]{3} \d{4}$/i) {
+				my $error = {
+					'type'		=> 'annotation_error; invalid date format',
+					'detail'	=> '\''.$annotation->{note}.'\' doesn\'t match expected date format \'dd mmmm yyyy\'',
+				};
+				$self->data_error($error);
+				return 0;
 				undef;
 			}
 		}
@@ -328,29 +394,34 @@ sub _tidy_user_entry {
 	# the purpose of this sub is to remove and standardise punctuation for easier matching
 	my ($string, $field_name) = @_;
 	if ($string ne "") {
+		my $original_string = $string;
 		if ($field_name eq "person:first") {
-			$string =~ s/\. ?/ /g;
-			$string =~ s/^\s+//;
+			$string =~ s/\. ?/ /g;	# remove full stops from dotted initials
+			$string =~ s/^\s+//;	# remove leading spaces
 			if ($string =~ /\bLORD\b/) {
-				$string =~ s/LORD/Lord/;
+				$string =~ s/LORD/Lord/; # a later substitution converts 2-4 upper case charaters into space delimited initials
 			}
 			if ($string =~ /^[A-Z]{2,4}$/) {
-				$string =~ s/([A-Z])/$1 /g;
+				$string =~ s/([A-Z])/$1 /g; # convert "ABC" format initials to "A B C " format
 				$string = _tidy_user_entry($string, $field_name);
 			}
 			if ($string =~ /^(?:\b[a-z]\b ?)+$/) {
-				$string = uc $string;
+				$string = uc $string; # uppercase all initials
 				$string = _tidy_user_entry($string, $field_name);
 			}
 			if ($string =~ /\bSir /) {
-				$string =~ s/\bSir //;
+				$string =~ s/\bSir //; # remove titles. Consider creating a separate field for stripped titles
 				$string = _tidy_user_entry($string, $field_name);
 			}
 			if ($string =~ /(The )?\bHon\.? /) {
-				$string =~ s/(The )?\bHon\.? //;
+				$string =~ s/(The )?\bHon\.? //; # remove titles. Consider creating a separate field for stripped titles
 				$string = _tidy_user_entry($string, $field_name);
 			}
 			$string =~ s/\s+$//;
+			if ($string ne $original_string) {
+				#print "'$original_string' changed to '$string'\n";
+				undef;
+			}
 			return $string;
 		}
 		elsif ($field_name eq "person:surname") {
@@ -369,7 +440,7 @@ sub _tidy_user_entry {
 				if ($string =~ /($military_suffixes_regex)[,\. ]*$/i) {
 					my $new_string = $string;
 					$new_string =~ s/(?:$military_suffixes_regex)[,\. ]*$//gi;
-					print "'$string' -> '$new_string'\n";
+					# print "'$string' -> '$new_string'\n";
 					# reject new_string if it ends in \bstopWord
 					#   eg to
 					if ($new_string !~ /\bto *$/) {
@@ -392,6 +463,10 @@ sub _tidy_user_entry {
 			if ($string =~ m/ +-./ || $string =~ m/.- +/) {
 				$string =~ s/ *- */-/;
 			}
+			if ($string ne $original_string) {
+				#print "'$original_string' changed to '$string'\n";
+				undef;
+			}
 			return $string;
 		}
 		else {
@@ -403,6 +478,9 @@ sub _tidy_user_entry {
 sub _unabbreviate_unit_name {
 	my ($unit_name) = @_;
 	my $original_unit_name = $unit_name;
+	if ($unit_name =~ m|\bA\.D\.V\.S\.?\b|i) {
+		$unit_name =~ s|\bA\.D\.V\.S\.?\b|Assistant Director Veterinary Service|i;
+	}
 	if ($unit_name =~ m|\bcav\.?\b|i) {
 		$unit_name =~ s|\bcav\.?\b|Cavalry|i;
 	}
@@ -430,8 +508,11 @@ sub _unabbreviate_unit_name {
 	if ($unit_name =~ m|\bdiv\b|i) {
 		$unit_name =~ s|\bdiv\b|Division|i;
 	}
-	if ($unit_name =~ m|\bd\.g\.|i) {
+	if ($unit_name =~ m|\bd\.g\.[\b.*]?$|i) {
 		$unit_name =~ s|\bd\.g\.|Dragoon Guards|i;
+	}
+	if ($unit_name =~ m|\bd[\.(ragoon)]?\s?gds\.?[\b.*]?$|i) {
+		$unit_name =~ s|\bd[\.(ragoon)]?\s?gds\.?|Dragoon Guards|i;
 	}
 	if ($unit_name =~ m|\bd[ie]vision\b|i) {
 		$unit_name =~ s|\bd[ie]vision\b|Division|i;
@@ -441,6 +522,9 @@ sub _unabbreviate_unit_name {
 	}
 	if ($unit_name =~ m|\bregt\b|i) {
 		$unit_name =~ s|\bregt\b|Regiment|i;
+	}
+	if ($unit_name =~ m|\br\.e\.[\b.*]?$|i) {
+		$unit_name =~ s|\br\.e\.|Royal Engineers|i;
 	}
 	if ($unit_name =~ m|\bregiment\b|i) {
 		$unit_name =~ s|\bregiment\b|Regiment|i;
@@ -458,8 +542,7 @@ sub _unabbreviate_unit_name {
 		$unit_name =~ s/\br\.?h\.?a\.?\b/RFA/i
 	}
 	if ($unit_name ne $original_unit_name) {
-		print "Unit name: '$original_unit_name' changed to '$unit_name'\n";
-		undef;
+		#print "Unit name: '$original_unit_name' changed to '$unit_name'\n";
 	}
 	return $unit_name;
 }

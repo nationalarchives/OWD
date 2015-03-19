@@ -4,9 +4,9 @@ use Data::Dumper;
 use OWD::Annotation;
 
 sub new {
-	my ($self, $_page, $_classification) = @_;
+	my ($class, $_page, $_classification) = @_;
 	my @_annotations;
-	my $classification_obj = bless {}, $self;
+	my $classification_obj = bless {}, $class;
 
 	if (!defined $_classification->{user_name}) { # Ensure every classification has a user_name
 		$_classification->{user_name} = "<anonymous>-$_classification->{user_ip}";
@@ -38,12 +38,11 @@ sub new {
 		else {
 			my $obj_annotation = OWD::Annotation->new($classification_obj,$annotation);
 			if (ref($obj_annotation) eq 'OWD::Annotation') {
-				push @_annotations, OWD::Annotation->new($classification_obj,$annotation);
+				push @_annotations, $obj_annotation;
 			}
 		}
 	}
 	delete $_classification->{annotations}; # separate the individual annotations from the classification object
-	
 	$classification_obj->{_annotations} = \@_annotations;
 	return $classification_obj;
 }
@@ -89,7 +88,7 @@ sub compare_classifications {
 	print Dumper $other->get_tag_type_counts();
 }
 
-sub annotations_count {
+sub get_annotations_count {
 	my ($self) = @_;
 	return scalar @{$self->{_annotations}};
 }

@@ -5,6 +5,7 @@ use OWD::Processor;
 use MongoDB;
 use Data::Dumper;
 
+my $debug = 1;
 my $war_diary_server	= "localhost:27017";
 my $war_diary_db_name	= "war_diary_2014-11-24";
 my $war_diary_output_db	= "war_diary_export";
@@ -22,11 +23,11 @@ $owd->set_logging_db($logging_db);
 
 my $total_raw_tag_counts;
 my $diary_count = 0;
-while (my $diary = $owd->get_diary()) {
-#my $diary = $owd->get_diary("GWD0000001");
-#{
+#while (my $diary = $owd->get_diary()) {
+my $diary = $owd->get_diary("GWD0000001");
+{
 	$diary_count++;
-	print "$diary_count: ",$diary->get_docref(),"\n";
+	print "$diary_count: ",$diary->get_docref()," (".$diary->get_zooniverse_id().")\n";
 	my $num_pages_with_classifications = $diary->load_classifications();
 	if ($diary->get_status() eq "complete") {
 		$diary->strip_multiple_classifications_by_single_user();
@@ -39,7 +40,9 @@ while (my $diary = $owd->get_diary()) {
 			$total_raw_tag_counts->{$type} += $count;
 		}
 	}
+
 	$diary->DESTROY();
+	undef $diary;
 }
 
 my $total_tags;

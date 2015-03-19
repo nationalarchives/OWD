@@ -1,16 +1,21 @@
 package OWD::Page;
 use strict;
 use OWD::Classification;
+use OWD::Cluster;
 use Algorithm::ClusterPoints;
 use Data::Dumper;
 use Text::LevenshteinXS;
 
+my $debug = 1;
+
 sub new {
-	my ($self, $_diary, $_subject) = @_;
+	my ($class, $_diary, $_subject) = @_;
 	return bless {
 		'_page_data'	=> $_subject,
 		'_diary'		=> $_diary,
-	}, $self;
+	}, $class;
+	# ^ destroy _diary circular ref when the page is destroyed
+	
 }
 
 sub load_classifications {
@@ -78,7 +83,7 @@ sub strip_multiple_classifications_by_single_user {
 			# iterate through classifications i and i+1. Select the best one
 			my $classification_scores = {};
 			foreach my $classification (@$classifications_by_user) {
-				push @{$classification_scores->{$classification->annotations_count()}},
+				push @{$classification_scores->{$classification->get_annotations_count()}},
 					{
 						'id'			=> $classification->get_mongo_id(),
 						'updated_at'	=> $classification->get_updated_at(),
@@ -169,7 +174,14 @@ sub cluster_tags {
 	# from other users to these clusters.
 	my $annotations_by_type_and_user = $self->get_annotations_by_type_and_user();
 	foreach my $user (keys %{$annotations_by_type_and_user->{doctype}}) {
-		push @{$self->{_clusters}{doctype}}, $annotations_by_type_and_user->{doctype}{$user}[0];
+		#push @{$self->{_clusters}{doctype}}, $annotations_by_type_and_user->{doctype}{$user}[0];
+		if (!defined($self->{_clusters}{doctype})) {
+			push @{$self->{_clusters}{doctype}}, OWD::Cluster->new($self,$annotations_by_type_and_user->{doctype}{$user}[0]);
+		}
+		else {
+			my $cluster = $self->{_clusters}{doctype}[0];
+			$cluster->add_annotation($annotations_by_type_and_user->{doctype}{$user}[0]);
+		}
 	}
 	foreach my $type (keys %$annotations_by_type_and_user) {
 		next if $type eq 'doctype';
@@ -181,7 +193,8 @@ sub cluster_tags {
 				if ($first_user_for_this_type) {
 					# This is the top user for the tag type, so create a new cluster for each of their tags
 					foreach my $annotation (@{$user_annotations_by_type_popularity->{$num_annotations}{$username}}) {
-						push @{$self->{_clusters}{$type}}, [$annotation];
+						#push @{$self->{_clusters}{$type}}, [$annotation];
+						push @{$self->{_clusters}{$type}}, OWD::Cluster->new($self,$annotation);
 					}
 					$first_user_for_this_type = 0;
 				}
@@ -201,26 +214,43 @@ sub _match_annotation_against_existing {
 	# for each cluster fpr this type so far, try matching new tag to it
 	# if they have the same user, reject
 	# find the nearest tag that meets "similarity" requirements. If there aren't any, start a new cluster.
+	if ($new_annotation->get_id() eq 'AWD000003p_<anonymous>-109.11.2.69_16_33') {
+		undef;
+	}
 	my $type = $new_annotation->get_type();
 	my $annotation_distance_from_cluster;
 	for (my $cluster_num = 0; $cluster_num <  @{$self->{_clusters}{$type}}; $cluster_num++) {
-		# check for location +/- 9?
-		# check for similarity
-		$annotation_distance_from_cluster->[$cluster_num] = distance($new_annotation->get_coordinates(),$self->{_clusters}{$type}[$cluster_num][0]->get_coordinates());
+		# check for distance (x/y)
+		# check for similarity (annotation string)
+		my $distance = acceptable_distance($type,$new_annotation->get_coordinates(),$self->{_clusters}{$type}[$cluster_num]->get_centroid());
+		if (defined($distance)) {
+			$annotation_distance_from_cluster->{$cluster_num} = $distance;
+		}
 	}
-	
+	if (defined($annotation_distance_from_cluster)) {
+		# select the best cluster
+		# sort by cluster distance, then try any potential matches for note string similarity
+		foreach my $cluster_num (sort {$annotation_distance_from_cluster->{$a} <=> $annotation_distance_from_cluster->{$b}} keys %{$annotation_distance_from_cluster}) {
+			# to decide whether the two annotations we are comparing are of the same thing we may need to use
+			# various criteria
+			my $cluster_string = $self->{_clusters}{$type}[$cluster_num]->get_first_annotation()->get_string_value();
+			my $new_annotation_string = $new_annotation->get_string_value();
+			if (similar_enough($type, $cluster_string, $new_annotation_string)) {
+				# add new annotation to this cluster
+				$self->{_clusters}{$type}[$cluster_num]->add_annotation($new_annotation);
+			}
+		}
+	}
+	else {
+		# create a new cluster
+		push @{$self->{_clusters}{$type}}, OWD::Cluster->new($self,$new_annotation);
+	}
 	undef;
 
 =for
 	my $potential_matching_clusters;
 	# check each existing cluster that we've found so far
 	for (my $next_cluster = 0; $next_cluster < @$clustered_tags; $next_cluster++) {
-		my $cluster = $clustered_tags->[$next_cluster];
-		next if defined $cluster->[0]{document};
-		# skip this cluster if its type is different than the new tag
-		next if $cluster->[0]{type} ne $new_tag->{type};
-		# skip this cluster if the contributor of $new_tag already has a tag in the cluster
-		next if _already_has_tag_in_cluster($cluster,$new_tag->{user_name});
 		# check if the new tag is "close" to at least one of the tags in the cluster.
 		my $shortest_distance_to_cluster_member;
 		foreach my $clustered_tag (@$cluster) {
@@ -335,12 +365,52 @@ sub _match_annotation_against_existing {
 }
 
 sub acceptable_distance {
-	my () = @_;
+	my ($type, $coord1, $coord2) = @_;
+	# acceptable difference is a combination of a maximum x distance, a maximum y distance, and a 
+	# maximum total distance (because there needs to be more tolerance on the x axis than the y axis)
+	my $x_max = 9;
+	my $y_max = 3;
+	my $dist_max = 8;
+	my $x_dist = abs($coord1->[0] - $coord2->[0]);
+	my $y_dist = abs($coord1->[1] - $coord2->[1]);
+	if ($x_dist <= $x_max && $y_dist <= $y_max) {
+		my $diff = distance($coord1,$coord2);
+		if ($diff <= $dist_max) {
+			return $diff;
+		}
+		else {
+			return undef;
+		}
+	}
+	else {
+		return undef;
+	}
 }
 
 sub distance {
 	my ($coord1,$coord2) = @_;
-	return sqrt( ( ($coord1->[0] - $coord2->[0])^2 ) + ( ($coord1->[0] - $coord2->[1])^2) );
+	my $sum_of_squares = ( ($coord1->[0] - $coord2->[0])**2 ) + ( ($coord1->[1] - $coord2->[1])**2);
+	if ($sum_of_squares == 0) {
+		undef;
+	}
+	return sqrt( ( ($coord1->[0] - $coord2->[0])**2 ) + ( ($coord1->[1] - $coord2->[1])**2) );
+}
+
+sub similar_enough {
+	my ($type, $string1, $string2) = @_;
+	my $max_lev_score;
+	if (length($string1) < 4) {
+		$max_lev_score = 0;
+	}
+	else {
+		$max_lev_score = length($string1)/2;
+	}
+	if (Text::LevenshteinXS::distance($string1,$string2) > $max_lev_score) {
+		return 0;
+	}
+	else {
+		return 1;
+	}
 }
 
 sub _num_tags_of_type {
@@ -504,6 +574,9 @@ sub DESTROY {
 	my ($self) = @_;
 	foreach my $classification (@{$self->{_classifications}}) {
 		$classification->DESTROY();
+	}
+	foreach my $cluster (@{$self->{_clusters}}) {
+		$cluster->DESTROY();
 	}
 	$self->{_diary} = undef;
 }

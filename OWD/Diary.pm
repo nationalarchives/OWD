@@ -3,9 +3,12 @@ use strict;
 use warnings;
 use OWD::Page;
 
+my $debug = 2;
 sub new {
-	my ($self,$_processor, $_group) = @_;
-	my $_diary = bless {	},$self;
+	my ($class,$_processor, $_group) = @_;
+	my $_diary = bless {},$class;
+	$_diary->{_group_data}	= $_group;
+	$_diary->{_processor}	= $_processor;
 	my $subjects_ref = [];	# an array of subjects (pages) within the diary, sorted by page number
 	my $cur_subjects = $_processor->{coll_subjects}->find({"group.zooniverse_id" => $_group->{zooniverse_id}});
 	$cur_subjects->sort({"metadata.page_number" => 1});
@@ -15,8 +18,6 @@ sub new {
 		}
 	}
 	$_diary->{_pages}		= $subjects_ref;
-	$_diary->{_group_data}	= $_group;
-	$_diary->{_processor}	= $_processor;
 	return $_diary;
 }
 
@@ -24,6 +25,7 @@ sub load_classifications {
 	my ($self) = @_;
 	my $diary_return_val = 0;
 	foreach my $page (@{$self->{_pages}}) {
+		#print "  page $page->{_page_data}{metadata}{page_number}\n" if ($debug > 1);
 		my $return_val = $page->load_classifications();
 		if ($return_val) {
 			$diary_return_val++;
