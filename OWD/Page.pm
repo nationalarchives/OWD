@@ -214,9 +214,6 @@ sub _match_annotation_against_existing {
 	# for each cluster fpr this type so far, try matching new tag to it
 	# if they have the same user, reject
 	# find the nearest tag that meets "similarity" requirements. If there aren't any, start a new cluster.
-	if ($new_annotation->get_id() eq 'AWD000003p_<anonymous>-109.11.2.69_16_33') {
-		undef;
-	}
 	my $type = $new_annotation->get_type();
 	my $annotation_distance_from_cluster;
 	for (my $cluster_num = 0; $cluster_num <  @{$self->{_clusters}{$type}}; $cluster_num++) {
@@ -230,6 +227,7 @@ sub _match_annotation_against_existing {
 	if (defined($annotation_distance_from_cluster)) {
 		# select the best cluster
 		# sort by cluster distance, then try any potential matches for note string similarity
+		my $annotation_has_been_clustered = 0;
 		foreach my $cluster_num (sort {$annotation_distance_from_cluster->{$a} <=> $annotation_distance_from_cluster->{$b}} keys %{$annotation_distance_from_cluster}) {
 			# to decide whether the two annotations we are comparing are of the same thing we may need to use
 			# various criteria
@@ -238,139 +236,47 @@ sub _match_annotation_against_existing {
 			if (similar_enough($type, $cluster_string, $new_annotation_string)) {
 				# add new annotation to this cluster
 				$self->{_clusters}{$type}[$cluster_num]->add_annotation($new_annotation);
+				$annotation_has_been_clustered = 1;
+				last;
 			}
+			else {
+				undef;
+			}
+		}
+		if (!$annotation_has_been_clustered) {
+			# if we get to here, though there were nearby clusters, they were too different to be able
+			# to add $new_annotation to the cluster. In this case we should create a new cluster.
+			push @{$self->{_clusters}{$type}}, OWD::Cluster->new($self,$new_annotation);
 		}
 	}
 	else {
 		# create a new cluster
 		push @{$self->{_clusters}{$type}}, OWD::Cluster->new($self,$new_annotation);
 	}
-	undef;
-
-=for
-	my $potential_matching_clusters;
-	# check each existing cluster that we've found so far
-	for (my $next_cluster = 0; $next_cluster < @$clustered_tags; $next_cluster++) {
-		# check if the new tag is "close" to at least one of the tags in the cluster.
-		my $shortest_distance_to_cluster_member;
-		foreach my $clustered_tag (@$cluster) {
-			my $distance = _acceptable_cluster_distance($clustered_tag,$new_tag); 
-			if ( defined $distance ) {
-				if (!defined $shortest_distance_to_cluster_member || $distance < $shortest_distance_to_cluster_member) {
-					$shortest_distance_to_cluster_member = $distance;
-				}
-			}
-		}
-		# if $shortest_distance_to_cluster_member is not defined, the current tag and current cluster
-		# do not meet proximity requirements
-		next if !defined $shortest_distance_to_cluster_member;
-
-		if ($new_tag->{type} eq "diaryDate") {
-#			if ($new_tag->{note} ne $cluster->[0]{note}) {
-#				next;
-#			}
-		}
-		elsif ($new_tag->{type} eq "time") {
-			if ($new_tag->{note} ne $cluster->[0]{note}) {
-				next;
-			}
-		}
-		elsif ($new_tag->{type} eq "person") {
-			# TODO: Is it sufficient to do a fuzzy match against one of the clustered value
-			# rather than all of them?
-			if (length($new_tag->{note}{surname}) < 3) {
-				if (Text::LevenshteinXS::distance($new_tag->{note}{surname},$cluster->[0]{note}{surname}) > 0) {
-					next;
-				}
-			}
-			else {
-				my $ls_diff = Text::LevenshteinXS::distance($new_tag->{note}{surname},$cluster->[0]{note}{surname});
-				if ( $ls_diff > length($new_tag->{note}{surname})/2) {
-					next;
-				}
-			}
-		}
-		elsif ($new_tag->{type} eq "casualties") {
-			# no special effort required, usually only recorded once per page
-		}
-		elsif ($new_tag->{type} eq "mapRef") {
-			# no special effort required, too complicated to cluster on more than coord and type
-		}
-		elsif ($new_tag->{type} eq "weather") {
-			# don't bother with weather clustering, the tags are sufficiently rare
-		}
-		elsif ($new_tag->{type} eq "activity") {
-			if ($new_tag->{note} ne $cluster->[0]{note}) {
-				next;
-			}
-		}
-		elsif ($new_tag->{type} eq "place") {
-			# TODO: Is it sufficient to do a fuzzy match against one of the clustered value
-			# rather than all of them?
-			if (length($new_tag->{note}{place}) < 3) {
-				if (Text::LevenshteinXS::distance($new_tag->{note}{place},$cluster->[0]{note}{place}) > 0) {
-					next;
-				}
-			}
-			else {
-				my $ls_diff = Text::LevenshteinXS::distance($new_tag->{note}{place},$cluster->[0]{note}{place});
-				if ( $ls_diff > (length(_shorter_string($new_tag->{note}{place},$cluster->[0]{note}{place}))/2)+1) {
-					next;
-				}
-			}
-		}
-		elsif ($new_tag->{type} eq "domestic") {
-			if ($new_tag->{note} ne $cluster->[0]{note}) {
-				next;
-			}
-		}
-		elsif ($new_tag->{type} eq "unit") {
-			# TODO: Is it sufficient to do a fuzzy match against one of the clustered value
-			# rather than all of them?
-			my $ls_diff = Text::LevenshteinXS::distance($new_tag->{note}{name},$cluster->[0]{note}{name});
-			if ( $ls_diff > length($new_tag->{note}{name})/2) {
-				next;
-			}
-		}
-		elsif ($new_tag->{type} eq "date") {
-			if ($new_tag->{note} ne $cluster->[0]{note}) {
-				next;
-			}
-		}
-		elsif ($new_tag->{type} eq "reference") { # reference will be a bitch to cluster, looks like a free-for-all free-text field
-			# don't bother trying to cluster reference on anything other than coord and type
-		}
-		elsif ($new_tag->{type} eq "gridRef") { # gridRef will be a bitch to cluster, looks like a free-for-all free-text field
-			# don't bother trying to cluster reference on anything other than coord and type
-		}
-		else {
-			print "CLUSTERERROR: Dunno how to cluster $new_tag->{type}\n" if $debug > 2; next;
-			undef: #dunno what to do here!
-		}
-		push @$potential_matching_clusters, {
-			"cluster"			=> $next_cluster,
-			"nearest_member"	=> $shortest_distance_to_cluster_member,
-		};
-	}
-	if (defined $potential_matching_clusters) {
-		# we've found at least one tag match
-		my $matching_cluster_num = _select_nearest_matching_cluster($potential_matching_clusters);
-		push @{$clustered_tags->[$matching_cluster_num]}, $new_tag;
-	}
-	else {
-		# if we get to here, then there was no matching existing cluster.  Start a new one.
-		push @$clustered_tags, [$new_tag];
-	}
-=cut
 }
 
 sub acceptable_distance {
 	my ($type, $coord1, $coord2) = @_;
 	# acceptable difference is a combination of a maximum x distance, a maximum y distance, and a 
 	# maximum total distance (because there needs to be more tolerance on the x axis than the y axis)
-	my $x_max = 9;
-	my $y_max = 3;
-	my $dist_max = 8;
+	my $x_max;
+	my $y_max;
+	my $dist_max;
+	if ($type eq 'person') {
+		$x_max = 11;
+		$y_max = 3;
+		$dist_max = 11;
+	}
+	elsif ($type eq 'diaryDate') {
+		$x_max = 15;
+		$y_max = 6;
+		$dist_max = 15;
+	}
+	else {
+		$x_max = 9;
+		$y_max = 3;
+		$dist_max = 8;
+	}
 	my $x_dist = abs($coord1->[0] - $coord2->[0]);
 	my $y_dist = abs($coord1->[1] - $coord2->[1]);
 	if ($x_dist <= $x_max && $y_dist <= $y_max) {
@@ -389,27 +295,32 @@ sub acceptable_distance {
 
 sub distance {
 	my ($coord1,$coord2) = @_;
-	my $sum_of_squares = ( ($coord1->[0] - $coord2->[0])**2 ) + ( ($coord1->[1] - $coord2->[1])**2);
-	if ($sum_of_squares == 0) {
-		undef;
-	}
 	return sqrt( ( ($coord1->[0] - $coord2->[0])**2 ) + ( ($coord1->[1] - $coord2->[1])**2) );
 }
 
 sub similar_enough {
 	my ($type, $string1, $string2) = @_;
-	my $max_lev_score;
-	if (length($string1) < 4) {
-		$max_lev_score = 0;
-	}
-	else {
-		$max_lev_score = length($string1)/2;
-	}
-	if (Text::LevenshteinXS::distance($string1,$string2) > $max_lev_score) {
-		return 0;
-	}
-	else {
+	my $lc_string1 = lc($string1);
+	my $lc_string2 = lc($string2);
+	if ($type eq 'activity') {
+		# don't bother checking for matching activity type, the selection of values is discrete and
+		# there are lots of disputes. Proximity is good enough.
 		return 1;
+	}
+	else {
+		my $max_lev_score;
+		if (length($string1) < 4) {
+			$max_lev_score = 0;
+		}
+		else {
+			$max_lev_score = length($string1)/2;
+		}
+		if (Text::LevenshteinXS::distance($lc_string1,$lc_string2) > $max_lev_score) {
+			return 0;
+		}
+		else {
+			return 1;
+		}
 	}
 }
 
