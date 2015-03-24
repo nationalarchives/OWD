@@ -5,6 +5,7 @@ use OWD::Cluster;
 use Algorithm::ClusterPoints;
 use Data::Dumper;
 use Text::LevenshteinXS;
+use Carp;
 
 my $debug = 1;
 
@@ -161,6 +162,15 @@ sub get_diary {
 	return $self->{_diary};
 }
 
+sub get_doctype {
+	my ($self) = @_;
+	unless (defined($self->{_clusters})) {
+		carp("get_doctype called on OWD::Page object before annotations have been clustered");
+		return undef;
+	}
+	return $self->{_clusters}{doctype}[0]{consensus_value};
+}
+
 sub num_classifications {
 	my ($self) = @_;
 	return scalar @{$self->{_classifications}};
@@ -206,7 +216,20 @@ sub cluster_tags {
 			}
 		}
 	}
-	undef;
+	foreach my $cluster_type (keys %{$self->{_clusters}}) {
+		foreach my $cluster (@{$self->{_clusters}{$cluster_type}}) {
+			if (@{$cluster->{_annotations}} <= 1) {
+				my $annotation = $cluster->{_annotations}[0];
+				my $id = $annotation->get_id();
+				my $string = $annotation->get_string_value();
+				my $error = {
+					'type'		=> 'cluster_error; single_annotation_cluster',
+					'detail'	=> "annotation '$id' ($string) can't be clustered with any other annotations",
+				};
+				$self->data_error($error);
+			}
+		}
+	}
 }
 
 sub _match_annotation_against_existing {
@@ -324,6 +347,15 @@ sub similar_enough {
 	}
 }
 
+sub establish_consensus {
+	my ($self) = @_;
+	foreach my $type (keys %{$self->{_clusters}}) {
+		foreach my $cluster (@{$self->{_clusters}{$type}}) {
+			$cluster->establish_consensus();
+		}
+	}
+}
+
 sub _num_tags_of_type {
 	my ($annotations_grouped_by_user) = shift;
 	my $user_annotations_by_num_uses;
@@ -420,7 +452,6 @@ sub _tidy_clusters {
 					undef;
 				}
 			}
-			undef;
 		}
 	}
 }
@@ -486,8 +517,13 @@ sub DESTROY {
 	foreach my $classification (@{$self->{_classifications}}) {
 		$classification->DESTROY();
 	}
-	foreach my $cluster (@{$self->{_clusters}}) {
-		$cluster->DESTROY();
+	if (ref($self->{_clusters}) ne 'ARRAY') {
+		undef;
+	}
+	foreach my $type (keys %{$self->{_clusters}}) {
+		foreach my $cluster (@{$self->{_clusters}{$type}}) {
+			$cluster->DESTROY();
+		}
 	}
 	$self->{_diary} = undef;
 }

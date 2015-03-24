@@ -15,6 +15,7 @@ sub new {
 	$classification_obj->{_page} = $_page;
 	$classification_obj->{_classification_data} = $_classification;
 	$classification_obj->{_num_annotations} = 0;
+	my $coord_check;
 	foreach my $annotation (@{$_classification->{annotations}}) {
 		# if the annotation type is "document", create an OWD::Annotation object out of it
 		# by rearranging it into a more Annotation-like structure
@@ -25,7 +26,6 @@ sub new {
 			delete $annotation->{document};
 		}
 		$annotation->{id} = $_classification->{subjects}[0]{zooniverse_id}.'_'.$_classification->{user_name}.'_'.$annotation->{coords}[0].'_'.$annotation->{coords}[1];
-		$classification_obj->{_num_annotations}++;
 
 		# for non-coordinate annotations, push them into the classification metadata
 		# as they aren't really volunteer defined anyway
@@ -36,14 +36,52 @@ sub new {
 			$_classification->{user_agent} = $annotation->{user_agent};
 		}
 		else {
+			my $coord_check_string = _coord_check_string($annotation->{coords});
 			my $obj_annotation = OWD::Annotation->new($classification_obj,$annotation);
+			# record the coordinates to enable duplicate checks.
 			if (ref($obj_annotation) eq 'OWD::Annotation') {
+				if (defined($coord_check->{$coord_check_string})) {
+					# a user has managed to log two annotations in exactly the same place. This is likely
+					# a bug and could result in a single user getting two "votes" on what entity is here.
+					# Check if the annotations are identical, and if they are, drop and log.
+					if ($obj_annotation->is_identical_to($coord_check->{$coord_check_string})) {
+						my $error = {
+							'type'		=> 'classification_error; duplicate_annotations',
+							'detail'	=> $classification_obj->{_classification_data}{user_name}.'\'s classification contains duplicate annotations at $coord_check_string',
+						};
+						$classification_obj->data_error($error);
+						$obj_annotation->DESTROY();
+						next;
+					}
+					else {
+						# the two annotations in the same place are actually different.
+						# this appears to be another bug, where of the two annotations in the same
+						# place, the first one in the array is an "echo" of a previous annotation
+						# so far, the second annotation always looks to be the one to keep.
+						# Get the @_annotations array element containing the earlier annotation,
+						# DESTROY() it to remove the  circular reference, then splice it out of the array
+						for (my $i=0; $i<@_annotations;$i++) {
+							if (_coord_check_string($_annotations[$i]->{_annotation_data}{coords}) eq $coord_check_string) {
+								$_annotations[$i]->DESTROY();
+								splice(@_annotations,$i,1);
+							}
+						}
+						my $error = {
+							'type'		=> 'classification_error; two_annotations_at_same_coord',
+							'detail'	=> $classification_obj->{_classification_data}{user_name}.'\'s classification contains two annotations at $coord_check_string',
+						};
+						$classification_obj->data_error($error);
+					}
+				}
 				push @_annotations, $obj_annotation;
+				$coord_check->{$coord_check_string} = $obj_annotation;
 			}
 		}
+		$classification_obj->{_num_annotations}++;
 	}
 	delete $_classification->{annotations}; # separate the individual annotations from the classification object
 	$classification_obj->{_annotations} = \@_annotations;
+	undef %$coord_check;
 	return $classification_obj;
 }
 
@@ -118,6 +156,10 @@ sub get_annotations_by_type {
 	# ensure this reference is destroyed to prevent memory leak
 }
 
+sub _coord_check_string {
+	my ($coords) = @_;
+	return $coords->[0].'_'.$coords->[1];
+}
 
 sub DESTROY {
 	my ($self) = @_;

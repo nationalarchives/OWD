@@ -185,14 +185,43 @@ sub get_string_value {
 			|| $self->{_annotation_data}{type} eq 'date'
 			|| $self->{_annotation_data}{type} eq 'title'
 			|| $self->{_annotation_data}{type} eq 'orders'
-			|| $self->{_annotation_data}{type} eq 'signals') {
+			|| $self->{_annotation_data}{type} eq 'signals'
+			|| $self->{_annotation_data}{type} eq 'doctype') {
 		$string_value = $self->{_annotation_data}{standardised_note};
 	}
 	else {
 		undef;
 	}
-	undef;
 	return $string_value;
+}
+
+sub is_identical_to {
+	my ($self,$other_annotation) = @_;
+	# return true if the contents of the two annotations are identical after checking:
+	# type, note (ignore coordinates and any other fields)
+	if ($self->{_annotation_data}{type} eq $other_annotation->{_annotation_data}{type}) {
+		if (ref($self->{_annotation_data}{note}) eq ref($other_annotation->{_annotation_data}{note})) {
+			if (ref($self->{_annotation_data}{note}) eq 'HASH') {
+				foreach my $key (keys %{$self->{_annotation_data}{note}}) {
+					if ($self->{_annotation_data}{note}{$key} ne $other_annotation->{_annotation_data}{note}{$key}) {
+						return 0;
+					}
+				}
+			}
+			else {
+				if ($self->{_annotation_data}{note} ne $other_annotation->{_annotation_data}{note}) {
+					return 0;
+				}
+			}
+		}
+		else {
+			return 0;
+		}
+	}
+	else {
+		return 0;
+	}
+	return 1;
 }
 
 sub _standardise_punctuation {
@@ -309,7 +338,6 @@ sub _fix_known_errors {
 	else {
 		$note_has_been_changed=1 if $annotation->{standardised_note} ne $original_note;
 	}
-	undef;
 	return $note_has_been_changed;
 }
 
@@ -418,10 +446,6 @@ sub _tidy_user_entry {
 				$string = _tidy_user_entry($string, $field_name);
 			}
 			$string =~ s/\s+$//;
-			if ($string ne $original_string) {
-				#print "'$original_string' changed to '$string'\n";
-				undef;
-			}
 			return $string;
 		}
 		elsif ($field_name eq "person:surname") {
@@ -465,7 +489,6 @@ sub _tidy_user_entry {
 			}
 			if ($string ne $original_string) {
 				#print "'$original_string' changed to '$string'\n";
-				undef;
 			}
 			return $string;
 		}

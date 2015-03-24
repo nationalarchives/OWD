@@ -33,7 +33,11 @@ my $diary = $owd->get_diary("GWD0000001");
 		$diary->strip_multiple_classifications_by_single_user();
 		$diary->report_pages_with_insufficient_classifications();
 		$diary->cluster_tags();
-
+		$diary->establish_consensus();
+		$diary->create_date_lookup();
+		open my $text_report, ">", "text_report.txt";
+		$diary->print_text_report($text_report);
+		
 		my $tag_types = {};
 		my $diary_raw_tag_type_counts = $diary->get_raw_tag_type_counts();
 		while (my ($type,$count) = each %$diary_raw_tag_type_counts) {
