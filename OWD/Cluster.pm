@@ -98,12 +98,13 @@ sub establish_consensus {
 	my ($self) = @_;
 	my %value_counts;
 	my $note_type = 'SCALAR';
-	$self->{consensus_type} = $self->{_annotations}[0]{_annotation_data}{type};
-	if ($self->{consensus_type} ne 'doctype' && $self->{consensus_type} ne 'diaryDate') {
+	my $consensus_annotation;
+	$consensus_annotation->{type} = $self->{_annotations}[0]{_annotation_data}{type};
+	$consensus_annotation->{coords} = $self->{median_centroid};
+	if ($consensus_annotation->{type} ne 'doctype' && $consensus_annotation->{type} ne 'diaryDate') {
 		undef;
 	} 
 	foreach my $annotation (@{$self->{_annotations}}) {
-		$self->{consensus_type} = $annotation->{_annotation_data}{type};
 		if (ref($annotation->{_annotation_data}{standardised_note}) eq 'HASH') {
 			$note_type = 'HASH';
 			foreach my $key (keys %{$annotation->{_annotation_data}{standardised_note}}) {
@@ -115,19 +116,26 @@ sub establish_consensus {
 		}
 	}
 	if ($note_type eq 'SCALAR') {
+		my $num_values = keys %value_counts;
+		if ($num_values > 1) {
+			undef;
+		}
 		my @values = reverse sort { $value_counts{$a} <=> $value_counts{$b} } keys %value_counts;
 		if ($value_counts{$values[0]} > 1) {
 			# not a lonely cluster, check if there's a tie
 			if ($value_counts{$values[0]} > $value_counts{$values[1]}) {
 				# consensus
-				$self->{consensus_value} = $values[0];
+				$consensus_annotation->{note} = $values[0];
 			}
 			else {
 				# tie for consensus
 				my $tied_score = $value_counts{$values[0]};
 				foreach my $value (@values) {
 					push @{$self->{consensus_value}}, $value if $value_counts{$value} == $tied_score;
-				} 
+				}
+				# if we get to here we need to make $consensus_annotation an array of possible annotations
+				# to possibly unpick later with more context
+				undef; 
 			}
 		}
 		else {
@@ -136,19 +144,27 @@ sub establish_consensus {
 	}
 	else {
 		foreach my $key (keys %value_counts) {
+			my $num_values = keys %value_counts;
+			if ($num_values > 1) {
+				next if $key eq 'ui-id-2';
+				undef;
+			}
 			my @values = reverse sort { $value_counts{$key}{$a} <=> $value_counts{$key}{$b} } keys %{$value_counts{$key}};
 			if ($value_counts{$values[0]} > 1) {
 				# not a lonely cluster, check if there's a tie
 				if ($value_counts{$values[0]} > $value_counts{$values[1]}) {
 					# consensus
-					$self->{consensus_value}{$key} = $values[0];
+					$consensus_annotation->{note}{$key} = $values[0];
 				}
 				else {
 					# tie for consensus
 					my $tied_score = $value_counts{$key}{$values[0]};
 					foreach my $value (@values) {
 						push @{$self->{consensus_value}{$key}}, $value if $value_counts{$value} == $tied_score;
-					} 
+					}
+					# if we get to here we need to make $consensus_annotation an array of possible annotations
+					# to possibly unpick later with more context
+					undef; 
 				}
 			}
 			else {

@@ -28,6 +28,8 @@ my $valid_annotation_types = {
 	'gridRef'	=> 1,
 };
 
+my @countries = qw/ France Germany Belgium Holland Netherlands /;
+ 
 my @military_suffixes = (
 	"A\.? ?S\.? ?C", 			"C\.? ?M\.? ?B",			"C\.? ?M\.? ?G",
 	"D\.? ?C\.? ?M",			"D.? ?O",					"D\.? ?O\.? ?M",								
@@ -243,6 +245,55 @@ sub _standardise_punctuation {
 				if ($standardised_field =~ m/ {2,}/) {
 					$standardised_field =~ s/ {2,}/ /g;;
 				}
+				if ($standardised_field =~ m/\bSt\.? ?/) {
+					if ($standardised_field =~ /St\.? Leonards/) {
+						$standardised_field =~ s/\bSt.? /St /g;;
+					}
+					else {
+						$standardised_field =~ s/\bSt.? /Saint /g;;
+					}
+					undef;
+				}
+				if ($standardised_field =~ m/\bMt\.? ?/) {
+					$standardised_field =~ s/\bMt.? /Mont /g;;
+					undef;
+				}
+				if ( $type_and_key eq 'person:surname' || $type_and_key eq 'place:place') {
+					if ($standardised_field =~ /([ \-])/) {
+						# TODO: Refinement for 'Mt. L'Eveque'? -> Mt L'Eveque?
+						# Mt. L'Eveque	i
+						# Mont L'Eveque	i
+						# Mt L'Eveque	i
+						my $delimiter = $1;
+						my @tokens = split /$delimiter/,$standardised_field;
+						my @new_tokens;
+						foreach my $token (@tokens) {
+							if ($token =~ m/\b[lL]'([a-z])/i) {
+								my $sub = uc($1);
+								$token =~ s/\b[lL]'[a-z]/l'$sub/i;
+								undef;
+							}
+							else {
+								$token = ucfirst(lc($token));
+							}
+							push @new_tokens, $token;
+						}
+						$standardised_field = join $delimiter, @new_tokens;
+						print "Spaces/hyphens: $standardised_field\n";
+						undef;
+					}
+				}
+				if ($standardised_field =~ /\b[A-Z]{2,}/) {
+					print "Multiple caps: $standardised_field\n";
+					$standardised_field = ucfirst(lc($standardised_field));
+					undef;
+				}
+				if ($standardised_field =~ /\b([a-z]+)\b/ 
+						&& $1 !~ /\ble\b/ && $1 !~ /\bl\b/) {
+					print "No caps: $standardised_field\n";
+					$standardised_field = ucfirst(lc($standardised_field));
+					undef;
+				}
 				$standardised_field =~ s/^\s+//;
 				$standardised_field =~ s/\s+$//;
 				
@@ -322,11 +373,18 @@ sub _fix_known_errors {
 	}
 	elsif ($annotation->{type} eq "place") {
 		# if places are past 10 (x axis) assume that they aren't the unit location
-		if ($annotation->{coords}[0] > 10) {
-			$annotation->{standardised_note}{probable_location} = "false";
-		}
-		else {
-			$annotation->{standardised_note}{probable_location} = 'true';
+#		if ($annotation->{coords}[0] > 10) {
+#			$annotation->{standardised_note}{probable_location} = "false";
+#		}
+#		else {
+#			$annotation->{standardised_note}{probable_location} = 'true';
+#		}
+		foreach my $country (@countries) {
+			if ($annotation->{standardised_note}{place} =~ /, *$country/i) {
+				$annotation->{standardised_note}{place} =~ s/, *$country//i;
+				$annotation->{standardised_note}{country} = $country;
+				last;
+			}
 		}
 	}
 	my $note_has_been_changed = 0;
