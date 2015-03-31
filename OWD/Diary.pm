@@ -296,7 +296,7 @@ sub print_text_report {
 				my $date = get_date_for($page_num, $y_coord);
 				print $fh "  $date->{friendly}\n";
 				foreach my $cluster (@{$chrono_clusters->{$y_coord}}) {
-					print $fh "    $cluster->{consensus_type}: $cluster->{consensus_value}\n";
+					print $fh "    ",$cluster->get_consensus_type(),":",$cluster->get_consensus_value(),"\n";
 				}
 			}
 		}

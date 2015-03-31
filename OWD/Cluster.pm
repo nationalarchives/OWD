@@ -133,11 +133,15 @@ sub establish_consensus {
 				# tie for consensus
 				my $tied_score = $value_counts{$values[0]};
 				foreach my $value (@values) {
-					push @{$self->{consensus_value}}, $value if $value_counts{$value} == $tied_score;
+					push @{$consensus_annotation->{note}}, $value if $value_counts{$value} == $tied_score;
 				}
 				# TODO if we get to here we need to make $consensus_annotation an array of possible annotations
 				# to possibly unpick later with more context
-				undef; 
+				my $error = {
+					'type'		=> 'cluster_error; value_tie',
+					'detail'	=> 'one of the values in the cluster was a tie of two different values',
+				};
+				$self->data_error($error);
 			}
 		}
 		else {
@@ -170,10 +174,15 @@ sub establish_consensus {
 						# tie for consensus, at least two options have the same score
 						my $tied_score = $value_counts{$key}{$values[0]};
 						foreach my $value (@values) {
-							push @{$self->{consensus_value}{$key}}, $value if $value_counts{$value} == $tied_score;
+							push @{$consensus_annotation->{note}{$key}}, $value if $value_counts{$value} == $tied_score;
 						}
 						# if we get to here we need to make $consensus_annotation an array of possible annotations
 						# to possibly unpick later with more context
+						my $error = {
+							'type'		=> 'cluster_error; value_tie',
+							'detail'	=> 'one of the values in the cluster was a tie of two different values',
+						};
+						$self->data_error($error);
 						undef; 
 					}
 				}
@@ -185,9 +194,22 @@ sub establish_consensus {
 			}
 			else {
 				# lonely cluster, the "most popular" value is provided by only a single user.
+				my $error = {
+					'type'		=> 'cluster_error; lonely_cluster',
+					'detail'	=> 'cluster consists of a single annotation only, not enough for a consensus',
+				};
+				$self->data_error($error);
 			}
 		}
 	}
+	# TODO This object needs to be of type ConsensusAnnotation. A consensus annotation doesn't have a
+	# parent classification (because it is derived from many classifications). It has a parent cluster,
+	# and the cluster links it to a page. It also doesn't need to go through the standardisation routines
+	# that a user annotation goes through (we've already done all that!)
+	# Can a ConsensusAnnotation inherit from Annotation, and is
+	# there any benefit to it doing so? The differences in properties probably preclude
+	my $obj_consensus = OWD::Annotation->new(undef,$consensus_annotation);
+	$self->{consensus_annotation} = $consensus_annotation;
 	# TODO add some QA code here to log where consensus wasn't available for key fields
 	# Also where we have lots of contributions for a field but no consensus?
 
@@ -195,8 +217,8 @@ sub establish_consensus {
 
 sub get_consensus_annotation {
 	my ($self) = @_;
-	if (defined($self->{consensus_value})) {
-		return $self->{consensus_value};
+	if (defined($self->{consensus_annotation})) {
+		return $self->{consensus_annotation};
 	}
 	else {
 		return undef;
@@ -211,7 +233,7 @@ sub data_error {
 			'type'		=> $self->{type},
 		};
 	}
-	$self->{_classification}->data_error($error_hash);
+	$self->{_page}->data_error($error_hash);
 }
 
 sub DESTROY {
