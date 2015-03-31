@@ -10,6 +10,7 @@ sub new {
 	push @{$obj->{_annotations}}, $annotation;
 	$obj->{centroid} = $annotation->{_annotation_data}{coords};
 	$obj->{median_centroid} = $annotation->{_annotation_data}{coords};
+	$obj->{type} = $annotation->{_annotation_data}{type};
 	$obj->{range} = 0;
 	return $obj;
 }
@@ -118,6 +119,7 @@ sub establish_consensus {
 	if ($note_type eq 'SCALAR') {
 		my $num_values = keys %value_counts;
 		if ($num_values > 1) {
+			# if we get here, there are several potential values for the current note
 			undef;
 		}
 		my @values = reverse sort { $value_counts{$a} <=> $value_counts{$b} } keys %value_counts;
@@ -133,46 +135,62 @@ sub establish_consensus {
 				foreach my $value (@values) {
 					push @{$self->{consensus_value}}, $value if $value_counts{$value} == $tied_score;
 				}
-				# if we get to here we need to make $consensus_annotation an array of possible annotations
+				# TODO if we get to here we need to make $consensus_annotation an array of possible annotations
 				# to possibly unpick later with more context
 				undef; 
 			}
 		}
 		else {
 			# lonely cluster
+			my $error = {
+				'type'		=> 'cluster_error; lonely_cluster',
+				'detail'	=> 'cluster consists of a single annotation only, not enough for a consensus',
+			};
+			$self->data_error($error);
 		}
 	}
 	else {
 		foreach my $key (keys %value_counts) {
-			my $num_values = keys %value_counts;
+			my $num_values = keys %{$value_counts{$key}};
 			if ($num_values > 1) {
+				# if we get here, there are several potential values for the current note key
 				next if $key eq 'ui-id-2';
 				undef;
 			}
 			my @values = reverse sort { $value_counts{$key}{$a} <=> $value_counts{$key}{$b} } keys %{$value_counts{$key}};
-			if ($value_counts{$values[0]} > 1) {
+			if ($value_counts{$key}{$values[0]} > 1) {
 				# not a lonely cluster, check if there's a tie
-				if ($value_counts{$values[0]} > $value_counts{$values[1]}) {
-					# consensus
-					$consensus_annotation->{note}{$key} = $values[0];
+				if (defined($values[1])) {
+					# there are at least two opinions for this note field
+					if ($value_counts{$key}{$values[0]} > $value_counts{$key}{$values[1]}) {
+						# consensus! One value is more popular than the others
+						$consensus_annotation->{note}{$key} = $values[0];
+					}
+					else {
+						# tie for consensus, at least two options have the same score
+						my $tied_score = $value_counts{$key}{$values[0]};
+						foreach my $value (@values) {
+							push @{$self->{consensus_value}{$key}}, $value if $value_counts{$value} == $tied_score;
+						}
+						# if we get to here we need to make $consensus_annotation an array of possible annotations
+						# to possibly unpick later with more context
+						undef; 
+					}
 				}
 				else {
-					# tie for consensus
-					my $tied_score = $value_counts{$key}{$values[0]};
-					foreach my $value (@values) {
-						push @{$self->{consensus_value}{$key}}, $value if $value_counts{$value} == $tied_score;
-					}
-					# if we get to here we need to make $consensus_annotation an array of possible annotations
-					# to possibly unpick later with more context
-					undef; 
+					# There is only one potential value for this value and it is supported by at least
+					# two volunteers.
+					$consensus_annotation->{note}{$key} = $values[0];
 				}
 			}
 			else {
-				# lonely cluster
+				# lonely cluster, the "most popular" value is provided by only a single user.
 			}
-			
 		}
 	}
+	# TODO add some QA code here to log where consensus wasn't available for key fields
+	# Also where we have lots of contributions for a field but no consensus?
+
 }
 
 sub get_consensus_annotation {
@@ -183,6 +201,17 @@ sub get_consensus_annotation {
 	else {
 		return undef;
 	}
+}
+
+sub data_error {
+	my ($self,$error_hash) = @_;
+	if (!defined $error_hash->{cluster}) {
+		$error_hash->{cluster} = {
+			'location'	=> $self->{median_centroid}[0].','.$self->{median_centroid}[1],
+			'type'		=> $self->{type},
+		};
+	}
+	$self->{_classification}->data_error($error_hash);
 }
 
 sub DESTROY {

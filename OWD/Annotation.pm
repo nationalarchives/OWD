@@ -33,9 +33,9 @@ my @countries = qw/ France Germany Belgium Holland Netherlands /;
 my @military_suffixes = (
 	"A\.? ?S\.? ?C", 			"C\.? ?M\.? ?B",			"C\.? ?M\.? ?G",
 	"D\.? ?C\.? ?M",			"D.? ?O",					"D\.? ?O\.? ?M",								
-	"D\.? ?S\.? ?O",			"K\.? ?C\.? ?B",
+	"D\.? ?S\.? ?O",			"K\.? ?C\.? ?B",			"\\(\\?Lt\\)?",
 	"M\.? ?C",					"M\.? ?M",					"M\.? ?O",
-	"M\.? ?O\.? ?R\.? ?C",	 	"R\.? ?A\.? ?M\.? ?C",
+	"M\.? ?O\.? ?R\.? ?C",	 	"R\.?A\.?",					"R\.? ?A\.? ?M\.? ?C",
 	"R\.? ?E",					"R\.? ?F\.? ?A",
 	"R\.? ?M",									
 );
@@ -93,6 +93,18 @@ sub new {
 		}
 		else {
 			$obj->{_annotation_data}{standardised_note} = $obj->{_annotation_data}{note};
+		}
+		
+		# Do something to standardise mentions of the King. He is mentioned a few times, but the fields
+		# available for tagging a "person" don't offer much chance of consistency for someone whose name
+		# and rank don't follow usual conventions
+		if (ref($obj->{_annotation_data}{standardised_note}) eq 'HASH'
+				&& ($obj->{_annotation_data}{standardised_note}{surname} =~ /H[^ ]* M[^ ]* The King/i
+				|| $obj->{_annotation_data}{standardised_note}{first} =~ /H[^ ]* M[^ ]* The King/i
+				|| $obj->{_annotation_data}{standardised_note}{first} =~ /King George V/i)) {
+			$obj->{_annotation_data}{standardised_note}{rank} = 'other';
+			$obj->{_annotation_data}{standardised_note}{first} = 'George';
+			$obj->{_annotation_data}{standardised_note}{surname} = 'H M The King';
 		}
 		
 		my $data_has_been_modified = 0;
@@ -239,6 +251,10 @@ sub _standardise_punctuation {
 			my $type_and_key = $self->{_annotation_data}{type}.":".$note_key;
 			if ($free_text_fields->{$type_and_key}) {
 				my $standardised_field = $self->{_annotation_data}{standardised_note}{$note_key};
+				if (($standardised_field =~ /\bking/i
+						&& $standardised_field ne 'H M The King') || $standardised_field =~ /de lisle/) {
+					undef;
+				}
 				if ($standardised_field =~ /\(?\?\)?/) {
 					$standardised_field =~ s/\(?\?+\)?//g;
 				}
@@ -252,18 +268,27 @@ sub _standardise_punctuation {
 					else {
 						$standardised_field =~ s/\bSt.? /Saint /g;;
 					}
-					undef;
 				}
 				if ($standardised_field =~ m/\bMt\.? ?/) {
 					$standardised_field =~ s/\bMt.? /Mont /g;;
-					undef;
 				}
-				if ( $type_and_key eq 'person:surname' || $type_and_key eq 'place:place') {
+				if ($type_and_key eq 'person:unit') {
+					my $field_is_unabbreviated = 0;
+					do {
+						my $unabbreviated_standardised_field = _unabbreviate_unit_name($standardised_field);
+						if ($unabbreviated_standardised_field eq $standardised_field) {
+							$field_is_unabbreviated = 1;
+						}
+						else {
+							$standardised_field = $unabbreviated_standardised_field;
+						}
+					} while (!$field_is_unabbreviated);
+					
+				}
+				if ( $type_and_key eq 'person:surname'
+						 || $type_and_key eq 'place:place'
+						 || $type_and_key eq 'person:unit') {
 					if ($standardised_field =~ /([ \-])/) {
-						# TODO: Refinement for 'Mt. L'Eveque'? -> Mt L'Eveque?
-						# Mt. L'Eveque	i
-						# Mont L'Eveque	i
-						# Mt L'Eveque	i
 						my $delimiter = $1;
 						my @tokens = split /$delimiter/,$standardised_field;
 						my @new_tokens;
@@ -271,28 +296,31 @@ sub _standardise_punctuation {
 							if ($token =~ m/\b[lL]'([a-z])/i) {
 								my $sub = uc($1);
 								$token =~ s/\b[lL]'[a-z]/l'$sub/i;
-								undef;
+							}
+							elsif ($token =~ m/\bles?\b/i
+									|| $token =~ m/\bdes?\b/i
+									|| $token =~ m/\bdu\b/i
+									|| $token =~ m/\bla\b/i
+									|| $token =~ m/^[lxvi]+$/i) {
+								# do nothing.
 							}
 							else {
-								$token = ucfirst(lc($token));
+								$token = ucfirst(lc($token)) if $token =~ /^[a-z]/i;
 							}
 							push @new_tokens, $token;
 						}
 						$standardised_field = join $delimiter, @new_tokens;
-						print "Spaces/hyphens: $standardised_field\n";
-						undef;
+#						print "Spaces/hyphens: $standardised_field\n";
 					}
 				}
-				if ($standardised_field =~ /\b[A-Z]{2,}/) {
-					print "Multiple caps: $standardised_field\n";
+				if ($standardised_field =~ /\b[A-Z]{2,}/ && $type_and_key ne 'person:unit') {
+#					print "Multiple caps: $standardised_field\n";
 					$standardised_field = ucfirst(lc($standardised_field));
-					undef;
 				}
-				if ($standardised_field =~ /\b([a-z]+)\b/ 
+				if ($standardised_field =~ /\b(?<!')([a-z]+)\b/ 
 						&& $1 !~ /\ble\b/ && $1 !~ /\bl\b/) {
-					print "No caps: $standardised_field\n";
-					$standardised_field = ucfirst(lc($standardised_field));
-					undef;
+#					print "No caps: $standardised_field\n";
+					$standardised_field = ucfirst(lc($standardised_field)) if ($standardised_field =~ /^[a-z]/);
 				}
 				$standardised_field =~ s/^\s+//;
 				$standardised_field =~ s/\s+$//;
@@ -304,6 +332,7 @@ sub _standardise_punctuation {
 			}
 			if ($standardised_note->{$note_key} ne $original_value) {
 				$note_has_been_modified = 1;
+				print "$original_value -> $standardised_note->{$note_key}\n" if $type_and_key ne 'person:first';
 			}
 		}
 	}
@@ -562,11 +591,20 @@ sub _unabbreviate_unit_name {
 	if ($unit_name =~ m|\bA\.D\.V\.S\.?\b|i) {
 		$unit_name =~ s|\bA\.D\.V\.S\.?\b|Assistant Director Veterinary Service|i;
 	}
-	if ($unit_name =~ m|\bcav\.?\b|i) {
-		$unit_name =~ s|\bcav\.?\b|Cavalry|i;
+	if ($unit_name =~ m|\bAmmn\b|i) {
+		$unit_name =~ s|\bAmmn\b|Ammunition|i;
+	}
+	if ($unit_name =~ m|\bcav\.|i) {
+		$unit_name =~ s|\bcav\.|Cavalry|i;
+	}
+	if ($unit_name =~ m|\bcav\b|i) {
+		$unit_name =~ s|\bcav\b|Cavalry|i;
 	}
 	if ($unit_name =~ m|\bcavalry\b|i) {
 		$unit_name =~ s|\bcavalry\b|Cavalry|i;
+	}
+	if ($unit_name =~ m|\bbde\.|i) {
+		$unit_name =~ s|\bbde\.|Brigade|i;
 	}
 	if ($unit_name =~ m|\bbde\b|i) {
 		$unit_name =~ s|\bbde\b|Brigade|i;
@@ -574,8 +612,11 @@ sub _unabbreviate_unit_name {
 	if ($unit_name =~ m|\bbr[ai]gai?de\b|i) {
 		$unit_name =~ s|\bbr[ai]gai?de\b|Brigade|i;
 	}
-	if ($unit_name =~ m|\bbr(ig)?\.?\b|i) {
-		$unit_name =~ s|\bbr(ig)?\.?\b|Brigade|i;
+	if ($unit_name =~ m|\bbr(ig)?\.|i) {
+		$unit_name =~ s|\bbr(ig)?\.|Brigade|i;
+	}
+	if ($unit_name =~ m|\bbr(ig)?\b|i) {
+		$unit_name =~ s|\bbr(ig)?\b|Brigade|i;
 	}
 	if ($unit_name =~ m|\bam +coln?\b|i) {
 		$unit_name =~ s|\bam +coln?\b|Ammunition Column|;
@@ -583,20 +624,23 @@ sub _unabbreviate_unit_name {
 	if ($unit_name =~ m|\bbty\b|i) {
 		$unit_name =~ s|\bbty\b|Battery|i;
 	}
+	if ($unit_name =~ m|\bbatt\b|i) {
+		$unit_name =~ s|\bbatt\b|Battery|i;
+	}
 	if ($unit_name =~ m|\bbattery\b|i) {
 		$unit_name =~ s|\bbattery\b|Battery|i;
 	}
-	if ($unit_name =~ m|\bdiv\b|i) {
-		$unit_name =~ s|\bdiv\b|Division|i;
+	if ($unit_name =~ m|\bdivn?\b|i) {
+		$unit_name =~ s|\bdivn?\b|Division|i;
+	}
+	if ($unit_name =~ m|\bd[ie]vision\b|i) {
+		$unit_name =~ s|\bd[ie]vision\b|Division|i;
 	}
 	if ($unit_name =~ m|\bd\.g\.[\b.*]?$|i) {
 		$unit_name =~ s|\bd\.g\.|Dragoon Guards|i;
 	}
 	if ($unit_name =~ m|\bd[\.(ragoon)]?\s?gds\.?[\b.*]?$|i) {
 		$unit_name =~ s|\bd[\.(ragoon)]?\s?gds\.?|Dragoon Guards|i;
-	}
-	if ($unit_name =~ m|\bd[ie]vision\b|i) {
-		$unit_name =~ s|\bd[ie]vision\b|Division|i;
 	}
 	if ($unit_name =~ m|\bhussars\b|i) {
 		$unit_name =~ s|\bhussars\b|Hussars|i;
@@ -613,17 +657,20 @@ sub _unabbreviate_unit_name {
 	if ($unit_name =~ m/\d+(st|nd|rd|th)\.?/i) {
 		$unit_name =~ s/(\d+)(?:st|nd|rd|th)\.?/$1/i
 	}
+	if ($unit_name =~ m/\br\.?f\.?a\.?\b/i) {
+		$unit_name =~ s/\br\.?f\.?a\.?\b/Royal Field Artillery/i
+	}
 	if ($unit_name =~ m/\brha\b/i) {
 		$unit_name =~ s/\brha\b/Royal Horse Artillery/i
 	}
 	if ($unit_name =~ m/\bRoyal Horse Artillery\b/i) {
 		$unit_name =~ s/\bRoyal Horse Artillery\b/Royal Horse Artillery/i
 	}
-	if ($unit_name =~ m/\br\.?f\.?a\.?\b/i) {
-		$unit_name =~ s/\br\.?h\.?a\.?\b/RFA/i
+	if ($unit_name =~ m/\br\.?i\.?r\.?\b/i) {
+		$unit_name =~ s/\br\.?i\.?r\.?\b/Royal Irish Regiment/i
 	}
 	if ($unit_name ne $original_unit_name) {
-		#print "Unit name: '$original_unit_name' changed to '$unit_name'\n";
+		print "Unit name: '$original_unit_name' changed to '$unit_name'\n";
 	}
 	return $unit_name;
 }
