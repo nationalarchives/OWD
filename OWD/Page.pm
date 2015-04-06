@@ -517,11 +517,11 @@ sub DESTROY {
 	foreach my $classification (@{$self->{_classifications}}) {
 		$classification->DESTROY();
 	}
-	if (ref($self->{_clusters}) ne 'ARRAY') {
-		undef;
-	}
 	foreach my $type (keys %{$self->{_clusters}}) {
 		foreach my $cluster (@{$self->{_clusters}{$type}}) {
+			if (ref($cluster) ne 'OWD::Cluster') {
+				undef;
+			}
 			$cluster->DESTROY();
 		}
 	}

@@ -23,10 +23,12 @@ $owd->set_logging_db($logging_db);
 
 my $total_raw_tag_counts;
 my $diary_count = 0;
+my $diary_id = "GWD0000001";
 #while (my $diary = $owd->get_diary()) {
-my $diary = $owd->get_diary("GWD0000001");
+my $diary = $owd->get_diary($diary_id);
 {
 	$diary_count++;
+	$owd->get_logging_db()->get_collection('error')->remove({"diary.group_id" => "$diary_id"});
 	print "$diary_count: ",$diary->get_docref()," (".$diary->get_zooniverse_id().")\n";
 	my $num_pages_with_classifications = $diary->load_classifications();
 	if ($diary->get_status() eq "complete") {

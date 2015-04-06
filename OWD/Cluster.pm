@@ -1,6 +1,7 @@
 package OWD::Cluster;
 use strict;
 use Data::Dumper;
+use OWD::ConsensusAnnotation;
 
 sub new {
 	my ($class, $page, $annotation) = @_;
@@ -99,12 +100,14 @@ sub establish_consensus {
 	my ($self) = @_;
 	my %value_counts;
 	my $note_type = 'SCALAR';
+	# Start building a consensus annotation structure to be blessed as a ConsensusAnnotation later
 	my $consensus_annotation;
 	$consensus_annotation->{type} = $self->{_annotations}[0]{_annotation_data}{type};
 	$consensus_annotation->{coords} = $self->{median_centroid};
-	if ($consensus_annotation->{type} ne 'doctype' && $consensus_annotation->{type} ne 'diaryDate') {
-		undef;
-	} 
+#	if ($consensus_annotation->{type} ne 'doctype' && $consensus_annotation->{type} ne 'diaryDate') {
+#		undef;
+#	}
+	# tally the number of instances of each value to get a "degree of consensus" score
 	foreach my $annotation (@{$self->{_annotations}}) {
 		if (ref($annotation->{_annotation_data}{standardised_note}) eq 'HASH') {
 			$note_type = 'HASH';
@@ -116,24 +119,25 @@ sub establish_consensus {
 			$value_counts{$annotation->{_annotation_data}{standardised_note}}++;
 		}
 	}
+	# Find the most popular value for the note (or for each key of the note, if a more complex annotation)
 	if ($note_type eq 'SCALAR') {
-		my $num_values = keys %value_counts;
-		if ($num_values > 1) {
-			# if we get here, there are several potential values for the current note
-			undef;
-		}
+#		my $num_values = keys %value_counts;
+#		if ($num_values > 1) {
+#			# if we get here, there are several potential values for the current note
+#			undef;
+#		}
 		my @values = reverse sort { $value_counts{$a} <=> $value_counts{$b} } keys %value_counts;
 		if ($value_counts{$values[0]} > 1) {
 			# not a lonely cluster, check if there's a tie
 			if ($value_counts{$values[0]} > $value_counts{$values[1]}) {
 				# consensus
-				$consensus_annotation->{note} = $values[0];
+				$consensus_annotation->{standardised_note} = $values[0];
 			}
 			else {
 				# tie for consensus
 				my $tied_score = $value_counts{$values[0]};
 				foreach my $value (@values) {
-					push @{$consensus_annotation->{note}}, $value if $value_counts{$value} == $tied_score;
+					push @{$consensus_annotation->{standardised_note}}, $value if $value_counts{$value} == $tied_score;
 				}
 				# TODO if we get to here we need to make $consensus_annotation an array of possible annotations
 				# to possibly unpick later with more context
@@ -168,13 +172,13 @@ sub establish_consensus {
 					# there are at least two opinions for this note field
 					if ($value_counts{$key}{$values[0]} > $value_counts{$key}{$values[1]}) {
 						# consensus! One value is more popular than the others
-						$consensus_annotation->{note}{$key} = $values[0];
+						$consensus_annotation->{standardised_note}{$key} = $values[0];
 					}
 					else {
 						# tie for consensus, at least two options have the same score
 						my $tied_score = $value_counts{$key}{$values[0]};
 						foreach my $value (@values) {
-							push @{$consensus_annotation->{note}{$key}}, $value if $value_counts{$value} == $tied_score;
+							push @{$consensus_annotation->{standardised_note}{$key}}, $value if $value_counts{$value} == $tied_score;
 						}
 						# if we get to here we need to make $consensus_annotation an array of possible annotations
 						# to possibly unpick later with more context
@@ -189,7 +193,7 @@ sub establish_consensus {
 				else {
 					# There is only one potential value for this value and it is supported by at least
 					# two volunteers.
-					$consensus_annotation->{note}{$key} = $values[0];
+					$consensus_annotation->{standardised_note}{$key} = $values[0];
 				}
 			}
 			else {
@@ -206,10 +210,12 @@ sub establish_consensus {
 	# parent classification (because it is derived from many classifications). It has a parent cluster,
 	# and the cluster links it to a page. It also doesn't need to go through the standardisation routines
 	# that a user annotation goes through (we've already done all that!)
-	# Can a ConsensusAnnotation inherit from Annotation, and is
-	# there any benefit to it doing so? The differences in properties probably preclude
-	my $obj_consensus = OWD::Annotation->new(undef,$consensus_annotation);
-	$self->{consensus_annotation} = $consensus_annotation;
+	# We should only bless our $consensus_annotation structure as an object if it has a standardised_note
+	# field. If it was not possible to get consensus, there's no point creating a ConsensusAnnotation object
+	if (defined($consensus_annotation->{standardised_note})) {
+		my $obj_consensus = OWD::ConsensusAnnotation->new($self,$consensus_annotation);
+		$self->{consensus_annotation} = $obj_consensus;
+	}
 	# TODO add some QA code here to log where consensus wasn't available for key fields
 	# Also where we have lots of contributions for a field but no consensus?
 

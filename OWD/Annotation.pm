@@ -8,6 +8,7 @@ my $valid_doctypes = {
 	'other'		=> 1,
 	'orders'	=> 1,
 	'signals'	=> 1,
+	'report'	=> 1,
 };
 
 my $valid_annotation_types = {

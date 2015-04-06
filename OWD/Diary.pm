@@ -160,9 +160,7 @@ sub create_date_lookup {
 		$page_date_lookup->{0}{friendly} = $current_date;
 		$page_date_lookup->{0}{sortable} = $current_sortable_date;
 		if (defined $page->{_clusters}{diaryDate}) {
-			# TODO: the next loop will work better if the clusters are dealt with in ascending 
-			# y co-ordinate order.
-			foreach my $cluster (@{$page->{_clusters}{diaryDate}}) {
+			foreach my $cluster (sort { $a->{median_centroid}[1] <=> $b->{median_centroid}[1] } @{$page->{_clusters}{diaryDate}}) {
 				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
 					my $date_y_coord = $cluster->{median_centroid}[1];
 					if (ref($consensus_annotation) eq 'ARRAY') {
@@ -196,13 +194,13 @@ sub create_date_lookup {
 					if (defined($page_date_lookup->{$date_y_coord})) {
 						# we already have a date for this page number and row.
 						if (ref($page_date_lookup->{$date_y_coord}) eq 'HASH' 
-							&& $page_date_lookup->{$date_y_coord}{friendly} ne $consensus_annotation) {
+							&& $page_date_lookup->{$date_y_coord}{friendly} ne $consensus_annotation->get_string_value()) {
 							# if the row has a single date so far, and it's different from the one
 							# we've just found, convert this value to an array and deal with it when 
 							# the rest of the dates for this page have been processed
 							my $value1 = $page_date_lookup->{$date_y_coord};
 							$page_date_lookup->{$date_y_coord} = 
-								[$value1, {'friendly' => $consensus_annotation, 'sortable' => get_sortable_date($consensus_annotation), 'cluster' => $cluster} ];
+								[$value1, {'friendly' => $consensus_annotation->get_string_value(), 'sortable' => get_sortable_date($consensus_annotation->get_string_value()), 'cluster' => $cluster} ];
 							next;
 						}
 						elsif (ref($page_date_lookup->{$date_y_coord}) eq 'ARRAY') {
@@ -211,8 +209,8 @@ sub create_date_lookup {
 							undef;
 						}
 					}
-					$page_date_lookup->{$date_y_coord}{friendly} = $consensus_annotation;
-					$page_date_lookup->{$date_y_coord}{sortable} = get_sortable_date($consensus_annotation);
+					$page_date_lookup->{$date_y_coord}{friendly} = $consensus_annotation->get_string_value();
+					$page_date_lookup->{$date_y_coord}{sortable} = get_sortable_date($page_date_lookup->{$date_y_coord}{friendly});
 					$page_date_lookup->{$date_y_coord}{cluster} = $cluster;
 					# ^ circular reference?
 				}
@@ -292,11 +290,17 @@ sub print_text_report {
 					push @{$chrono_clusters->{$cluster->{median_centroid}[1]}}, $cluster;
 				}
 			}
+			my $current_date;
 			foreach my $y_coord (sort keys %$chrono_clusters) {
 				my $date = get_date_for($page_num, $y_coord);
-				print $fh "  $date->{friendly}\n";
+				if (!defined($current_date) || $date->{friendly} ne $current_date) {
+					print $fh "  $date->{friendly}\n";
+					$current_date = $date->{friendly};
+				}
 				foreach my $cluster (@{$chrono_clusters->{$y_coord}}) {
-					print $fh "    ",$cluster->get_consensus_type(),":",$cluster->get_consensus_value(),"\n";
+					if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
+						print $fh "    ",$consensus_annotation->{_annotation_data}{type},":",$consensus_annotation->get_string_value,"\n";
+					}
 				}
 			}
 		}
