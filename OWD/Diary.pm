@@ -181,15 +181,11 @@ sub create_date_lookup {
 							}
 						}
 						$cluster->{consensus_value} = $selected_value;
-						$page_date_lookup->{$date_y_coord}{friendly} = $selected_value;
-						$page_date_lookup->{$date_y_coord}{sortable} = get_sortable_date($selected_value);
-						$page_date_lookup->{$date_y_coord}{cluster}  = $cluster;
 						my $error = {
 							'type'		=> 'cluster_error; disputed_value_tie',
 							'detail'	=> 'the diaryDate value for the cluster at '.$cluster->{median_centroid}[0].','.$cluster->{median_centroid}[1].' is disputed. Resolved by reference to undisputed neighbouring clusters',
 						};
 						$self->data_error($error);
-						next;
 					}
 					if (defined($page_date_lookup->{$date_y_coord})) {
 						# we already have a date for this page number and row.
@@ -204,15 +200,20 @@ sub create_date_lookup {
 							next;
 						}
 						elsif (ref($page_date_lookup->{$date_y_coord}) eq 'ARRAY') {
-							# we have at least three dates for this row. Implement this edge case
-							# if it comes up!
-							undef;
+							# we have at least three dates for this row.
+							# Add the new date to the existing array for dealing with later
+							push @{$page_date_lookup->{$date_y_coord}}, {'friendly' => $consensus_annotation->get_string_value(), 'sortable' => get_sortable_date($consensus_annotation->get_string_value()), 'cluster' => $cluster};
 						}
 					}
-					$page_date_lookup->{$date_y_coord}{friendly} = $consensus_annotation->get_string_value();
-					$page_date_lookup->{$date_y_coord}{sortable} = get_sortable_date($page_date_lookup->{$date_y_coord}{friendly});
-					$page_date_lookup->{$date_y_coord}{cluster} = $cluster;
-					# ^ circular reference?
+					else {
+#						$page_date_lookup->{$date_y_coord}{friendly} = $selected_value;
+#						$page_date_lookup->{$date_y_coord}{sortable} = get_sortable_date($selected_value);
+						
+						$page_date_lookup->{$date_y_coord}{friendly} = $consensus_annotation->get_string_value();
+						$page_date_lookup->{$date_y_coord}{sortable} = get_sortable_date($page_date_lookup->{$date_y_coord}{friendly});
+						$page_date_lookup->{$date_y_coord}{cluster} = $cluster;
+						# ^ circular reference?
+					}
 				}
 			}
 			my @rows = sort {$a <=> $b} keys %$page_date_lookup;
@@ -284,7 +285,15 @@ sub print_text_report {
 			# do we print the consensus data purely chronologically, or chronologically then categorised?
 			# try organising clusters by y-coordinates
 			my $chrono_clusters;
+			my $date_boundaries;
 			foreach my $type (keys %{$page->{_clusters}}) {
+				if ($type eq 'diaryDate') {
+					foreach my $cluster (@{$page->{_clusters}{$type}}) {
+						if (ref($cluster) eq 'OWD::Cluster' && defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
+							$date_boundaries->{$consensus_annotation->get_string_value()} = ${$consensus_annotation->get_coordinates()}[1];
+						} 
+					}
+				}
 				next if $type eq 'diaryDate' or $type eq 'doctype'; # we've used these to create our date_lookup function already
 				foreach my $cluster (@{$page->{_clusters}{$type}}) {
 					push @{$chrono_clusters->{$cluster->{median_centroid}[1]}}, $cluster;
@@ -294,12 +303,12 @@ sub print_text_report {
 			foreach my $y_coord (sort keys %$chrono_clusters) {
 				my $date = get_date_for($page_num, $y_coord);
 				if (!defined($current_date) || $date->{friendly} ne $current_date) {
-					print $fh "  $date->{friendly}\n";
+					print $fh "  $date->{friendly} ",$date_boundaries->{$date->{friendly}},"\n";
 					$current_date = $date->{friendly};
 				}
 				foreach my $cluster (@{$chrono_clusters->{$y_coord}}) {
 					if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
-						print $fh "    ",$consensus_annotation->{_annotation_data}{type},":",$consensus_annotation->get_string_value,"\n";
+						print $fh "    ",$consensus_annotation->{_annotation_data}{type},":",$consensus_annotation->get_string_value," (",join(",",@{$consensus_annotation->get_coordinates()}),")\n";
 					}
 				}
 			}

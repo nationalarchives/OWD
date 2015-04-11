@@ -168,7 +168,13 @@ sub get_doctype {
 		carp("get_doctype called on OWD::Page object before annotations have been clustered");
 		return undef;
 	}
-	return $self->{_clusters}{doctype}[0]{consensus_value};
+	my $consensus_annotation = $self->{_clusters}{doctype}[0]->get_consensus_annotation();
+	if (ref($consensus_annotation) ne 'OWD::ConsensusAnnotation') {
+		return undef;
+	}
+	else {
+		return $self->{_clusters}{doctype}[0]->get_consensus_annotation()->get_string_value();
+	}
 }
 
 sub num_classifications {
@@ -195,11 +201,14 @@ sub cluster_tags {
 	}
 	foreach my $type (keys %$annotations_by_type_and_user) {
 		next if $type eq 'doctype';
+		if ($self->get_page_num() == 9 && $type eq 'diaryDate') {
+			undef;
+		}
 		# for this tag type, who has the most tags. Use their tags to create the skeleton cluster layout
 		my $user_annotations_by_type_popularity = _num_tags_of_type($annotations_by_type_and_user->{$type});
 		my $first_user_for_this_type = 1;
 		foreach my $num_annotations (reverse sort {$a <=> $b} keys %$user_annotations_by_type_popularity) {
-			foreach my $username (keys %{$user_annotations_by_type_popularity->{$num_annotations}}) {
+			foreach my $username (sort keys %{$user_annotations_by_type_popularity->{$num_annotations}}) {
 				if ($first_user_for_this_type) {
 					# This is the top user for the tag type, so create a new cluster for each of their tags
 					foreach my $annotation (@{$user_annotations_by_type_popularity->{$num_annotations}{$username}}) {
@@ -217,6 +226,9 @@ sub cluster_tags {
 		}
 	}
 	foreach my $cluster_type (keys %{$self->{_clusters}}) {
+		if ($self->get_page_num() == 4 && $cluster_type eq 'diaryDate') {
+			undef;
+		}
 		foreach my $cluster (@{$self->{_clusters}{$cluster_type}}) {
 			if (@{$cluster->{_annotations}} <= 1) {
 				my $annotation = $cluster->{_annotations}[0];
@@ -234,41 +246,57 @@ sub cluster_tags {
 
 sub _match_annotation_against_existing {
 	my ($self, $new_annotation) = @_;
-	# for each cluster fpr this type so far, try matching new tag to it
-	# if they have the same user, reject
-	# find the nearest tag that meets "similarity" requirements. If there aren't any, start a new cluster.
+	if ($self->get_page_num() == 4 && $new_annotation->get_type() eq 'person') {
+		undef;
+	}
+	# for each cluster for this type so far, try matching new tag to it
+	# find the most similar nearby tag. If there aren't any, start a new cluster.
 	my $type = $new_annotation->get_type();
 	my $annotation_distance_from_cluster;
+	my $annotation_similarity_to_cluster;
 	for (my $cluster_num = 0; $cluster_num <  @{$self->{_clusters}{$type}}; $cluster_num++) {
+		# TODO first check that the contributor of new_annotation doesn't already have an annotation in this cluster. Next cluster if so. 
 		# check for distance (x/y)
-		# check for similarity (annotation string)
 		my $distance = acceptable_distance($type,$new_annotation->get_coordinates(),$self->{_clusters}{$type}[$cluster_num]->get_centroid());
 		if (defined($distance)) {
 			$annotation_distance_from_cluster->{$cluster_num} = $distance;
 		}
 	}
 	if (defined($annotation_distance_from_cluster)) {
+		# we found at least one sufficiently close cluster of the right type.
 		# select the best cluster
 		# sort by cluster distance, then try any potential matches for note string similarity
-		my $annotation_has_been_clustered = 0;
 		foreach my $cluster_num (sort {$annotation_distance_from_cluster->{$a} <=> $annotation_distance_from_cluster->{$b}} keys %{$annotation_distance_from_cluster}) {
-			# to decide whether the two annotations we are comparing are of the same thing we may need to use
-			# various criteria
-			my $cluster_string = $self->{_clusters}{$type}[$cluster_num]->get_first_annotation()->get_string_value();
-			my $new_annotation_string = $new_annotation->get_string_value();
-			if (similar_enough($type, $cluster_string, $new_annotation_string)) {
-				# add new annotation to this cluster
-				$self->{_clusters}{$type}[$cluster_num]->add_annotation($new_annotation);
-				$annotation_has_been_clustered = 1;
-				last;
-			}
-			else {
-				undef;
-			}
+			# TODO: Cause of error. Sometimes when two clusters are close to each other, a new annotation
+			# can be closer to the wrong cluster. Clustering needs to take account of cluster similarity,
+			# not just distance, when deciding which of two clusters to file an annotation in.
+			# Test on clustering of diaryDate "15 Aug 1914" for GWD0000001 p4.
+			@{$annotation_similarity_to_cluster->{$cluster_num}}{'score','length'} = @{similarity($type, $self->{_clusters}{$type}[$cluster_num]->get_first_annotation(),$new_annotation)};
 		}
-		if (!$annotation_has_been_clustered) {
+		# use the closest cluster unless the second closest cluster is identical to the new
+		# annotation, or is less than half the score of the nearest cluster.
+		my $selected_cluster;
+		my @close_clusters = sort {$annotation_distance_from_cluster->{$a} <=> $annotation_distance_from_cluster->{$a} } keys %$annotation_distance_from_cluster;
+		if ($annotation_similarity_to_cluster->{$close_clusters[0]}{score} == 0 
+			|| ( @close_clusters == 1 && $annotation_similarity_to_cluster->{$close_clusters[0]}{score} <= int($annotation_similarity_to_cluster->{$close_clusters[0]}{length} /2) - 1 ) ) {
+			$selected_cluster = $close_clusters[0];
+		}
+		elsif (@close_clusters > 1) {
+			my $best_cluster_so_far;
+			foreach my $cluster (@close_clusters) {
+				if (!defined($best_cluster_so_far->{score}) || $best_cluster_so_far->{score} > $annotation_similarity_to_cluster->{$cluster}{score}) {
+					@{$best_cluster_so_far}{'score','number'} = ($annotation_similarity_to_cluster->{$cluster}{score},$cluster);
+				}
+			}
+			$selected_cluster = $best_cluster_so_far->{number};
+			undef;
+		}
+		if (defined $selected_cluster) {
 			# if we get to here, though there were nearby clusters, they were too different to be able
 			# to add $new_annotation to the cluster. In this case we should create a new cluster.
+			$self->{_clusters}{$type}[$selected_cluster]->add_annotation($new_annotation);
+		}
+		else {
 			push @{$self->{_clusters}{$type}}, OWD::Cluster->new($self,$new_annotation);
 		}
 	}
@@ -286,14 +314,19 @@ sub acceptable_distance {
 	my $y_max;
 	my $dist_max;
 	if ($type eq 'person') {
-		$x_max = 11;
+		$x_max = 12;
 		$y_max = 3;
-		$dist_max = 11;
+		$dist_max = 12;
 	}
 	elsif ($type eq 'diaryDate') {
 		$x_max = 15;
-		$y_max = 6;
+		$y_max = 7;
 		$dist_max = 15;
+	}
+	elsif ($type eq 'activity') {
+		$x_max = 30;
+		$y_max = 4;
+		$dist_max = 30;
 	}
 	else {
 		$x_max = 9;
@@ -321,34 +354,69 @@ sub distance {
 	return sqrt( ( ($coord1->[0] - $coord2->[0])**2 ) + ( ($coord1->[1] - $coord2->[1])**2) );
 }
 
-sub similar_enough {
-	my ($type, $string1, $string2) = @_;
-	my $lc_string1 = lc($string1);
-	my $lc_string2 = lc($string2);
-	if ($type eq 'activity') {
-		# don't bother checking for matching activity type, the selection of values is discrete and
-		# there are lots of disputes. Proximity is good enough.
-		return 1;
+#sub similar_enough {
+#	# deprecated in favour of similarity() which returns a similarity score for the two strings,
+#	# rather than a simmple 0/1 true/false.
+#	my ($type, $string1, $string2) = @_;
+#	my $lc_string1 = lc($string1);
+#	my $lc_string2 = lc($string2);
+#	if ($type eq 'activity') {
+#		# don't bother checking for matching activity type, the selection of values is discrete and
+#		# there are lots of disputes. Proximity is good enough.
+#		return 1;
+#	}
+#	else {
+#		my $max_lev_score;
+#		if (length($string1) < 4) {
+#			$max_lev_score = 0;
+#		}
+#		else {
+#			$max_lev_score = length($string1)/2;
+#		}
+#		if (Text::LevenshteinXS::distance($lc_string1,$lc_string2) > $max_lev_score) {
+#			return 0;
+#		}
+#		else {
+#			return 1;
+#		}
+#	}
+#}
+
+sub similarity {
+	my ($type, $cluster_annotation, $new_annotation) = @_;
+	my ($score,$length);
+	if ($type eq 'activity' || $type eq 'domestic' || $type eq 'weather' || $type eq 'casualties') {
+		return [0,0];
+	}
+	elsif ($type eq 'person') {
+		# look for a low score on surname and firstname
+		$score = Text::LevenshteinXS::distance($cluster_annotation->get_field('surname'),$new_annotation->get_field('surname'));
+		$length = length($cluster_annotation->get_field('surname'));
+		if (defined($new_annotation->get_field('first')) && defined($cluster_annotation->get_field('first'))) {
+			$score += Text::LevenshteinXS::distance($cluster_annotation->get_field('first'),$new_annotation->get_field('first'));
+			$length += length($cluster_annotation->get_field('first'));
+		}
+	}
+	elsif ($type eq 'place') {
+		$score = Text::LevenshteinXS::distance($cluster_annotation->get_field('place'),$new_annotation->get_field('place'));
+		$length = length($cluster_annotation->get_field('place'));
 	}
 	else {
-		my $max_lev_score;
-		if (length($string1) < 4) {
-			$max_lev_score = 0;
+		my $type = $new_annotation->get_type();
+		if ($type ne 'diaryDate' && $type ne 'time' && $type ne 'place' && $type ne 'activity' && $type ne 'domestic' && $type ne 'weather' && $type eq 'weather') {
+			undef;
 		}
-		else {
-			$max_lev_score = length($string1)/2;
-		}
-		if (Text::LevenshteinXS::distance($lc_string1,$lc_string2) > $max_lev_score) {
-			return 0;
-		}
-		else {
-			return 1;
-		}
+		$score = Text::LevenshteinXS::distance($cluster_annotation->get_string_value(),$new_annotation->get_string_value());
+		$length = length($cluster_annotation->get_string_value());
 	}
+	return [$score,$length];
 }
 
 sub establish_consensus {
 	my ($self) = @_;
+	if ($self->get_page_num() == 4) {
+		undef;
+	}
 	foreach my $type (keys %{$self->{_clusters}}) {
 		foreach my $cluster (@{$self->{_clusters}{$type}}) {
 			$cluster->establish_consensus();

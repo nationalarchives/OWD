@@ -1,5 +1,6 @@
 package OWD::Annotation;
 use strict;
+use List::MoreUtils;
 
 my $valid_doctypes = {
 	'cover'		=> 1,
@@ -27,6 +28,19 @@ my $valid_annotation_types = {
 	'date'		=> 1,
 	'mapRef'	=> 1,
 	'gridRef'	=> 1,
+};
+
+my $valid_note_fields = {
+	'place'	=> { 
+				country		=> 1,
+				id 			=> 1,
+				lat			=> 1,
+				location	=> 1,
+				long		=> 1,
+				name		=> 1,
+				place		=> 1,
+				placeOption	=> 1,
+	},
 };
 
 my @countries = qw/ France Germany Belgium Holland Netherlands /;
@@ -144,6 +158,14 @@ sub get_type {
 	return $self->{_annotation_data}{type};
 }
 
+sub get_field {
+	my ($self,$field) = @_;
+	if (!defined $self->{_annotation_data}{standardised_note}{$field}) {
+		return undef;
+	}
+	return $self->{_annotation_data}{standardised_note}{$field};
+}
+
 sub get_classification {
 	my ($self) = @_;
 	return $self->{_classification};
@@ -166,8 +188,14 @@ sub get_string_value {
 		$string_value = $self->{_annotation_data}{standardised_note}{place};
 	}
 	elsif ($self->{_annotation_data}{type} eq 'person') {
+		if ($self->{_annotation_data}{standardised_note}{rank} ne '') {
+			$string_value = $self->{_annotation_data}{standardised_note}{rank};
+		}
 		if ($self->{_annotation_data}{standardised_note}{first} ne '') {
-			$string_value = $self->{_annotation_data}{standardised_note}{first};
+			if ($string_value ne '') {
+				$string_value .= ' ';
+			}
+			$string_value .= $self->{_annotation_data}{standardised_note}{first};
 		}
 		if ($self->{_annotation_data}{standardised_note}{surname} ne '') {
 			if ($string_value ne '') {
@@ -175,7 +203,12 @@ sub get_string_value {
 			}
 			$string_value .= $self->{_annotation_data}{standardised_note}{surname};
 		}
-		
+		if ($self->{_annotation_data}{standardised_note}{reason} ne '') {
+			if ($string_value ne '') {
+				$string_value .= ' ';
+			}
+			$string_value .= "(".$self->{_annotation_data}{standardised_note}{reason}.")";
+		}
 	}
 	elsif ($self->{_annotation_data}{type} eq 'reference') {
 		$string_value = $self->{_annotation_data}{standardised_note}{reference};
@@ -414,6 +447,17 @@ sub _fix_known_errors {
 				$annotation->{standardised_note}{place} =~ s/, *$country//i;
 				$annotation->{standardised_note}{country} = $country;
 				last;
+			}
+		}
+		foreach my $field (keys %{$annotation->{standardised_note}}) {
+			if ($field =~ /(ui-id-\d+)/) {
+				$annotation->{standardised_note}{placeOption} = $annotation->{standardised_note}{$1};
+				delete $annotation->{standardised_note}{$1}; 
+			}
+		}
+		foreach my $note_field (keys %{$annotation->{standardised_note}}) {
+			if (!defined($valid_note_fields->{place}{$note_field})) {
+				undef;
 			}
 		}
 	}

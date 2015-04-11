@@ -28,6 +28,7 @@ my $diary_id = "GWD0000001";
 my $diary = $owd->get_diary($diary_id);
 {
 	$diary_count++;
+	my $diary_id = $diary->get_zooniverse_id();
 	$owd->get_logging_db()->get_collection('error')->remove({"diary.group_id" => "$diary_id"});
 	print "$diary_count: ",$diary->get_docref()," (".$diary->get_zooniverse_id().")\n";
 	my $num_pages_with_classifications = $diary->load_classifications();
@@ -37,7 +38,7 @@ my $diary = $owd->get_diary($diary_id);
 		$diary->cluster_tags();
 		$diary->establish_consensus();
 		$diary->create_date_lookup();
-		open my $text_report, ">", "text_report.txt";
+		open my $text_report, ">", "output/$diary_id-text.txt";
 		$diary->print_text_report($text_report);
 		
 		my $tag_types = {};
