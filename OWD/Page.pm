@@ -38,6 +38,32 @@ sub load_classifications {
 	}
 }
 
+sub load_hashtags {
+	my ($self) = @_;
+	my $_hashtags = {};
+	my $cur_hashtags = 
+		$self->{_diary}->{_processor}->get_hashtags_collection()->find(
+			{'focus.name' => $self->{_page_data}->{zooniverse_id} }
+		);
+	if ($cur_hashtags->has_next) {
+		while (my $entry = $cur_hashtags->next) {
+			foreach my $comment (@{$entry->{comments}}) {
+				while ($comment->{body} =~ /(#\w+)/g) {
+					$_hashtags->{$1}++;
+				}
+			}
+			if (keys %$_hashtags > 0) {
+				undef;
+			}
+		}
+		$self->{_hashtags} = $_hashtags;
+		return 1;
+	}
+	else {
+		return undef;
+	}
+}
+
 sub get_raw_tag_type_counts {
 	my ($self) = @_;
 	my $page_tag_counts = {};
@@ -162,6 +188,21 @@ sub get_diary {
 	return $self->{_diary};
 }
 
+sub get_hashtags {
+	my ($self) = @_;
+	return $self->{_hashtags};
+}
+
+sub get_clusters {
+	my ($self) = @_;
+	return $self->{_clusters};
+}
+
+sub get_image_url {
+	my ($self) = @_;
+	return $self->{_page_data}{location}{standard};
+}
+
 sub get_doctype {
 	my ($self) = @_;
 	unless (defined($self->{_clusters})) {
@@ -201,9 +242,9 @@ sub cluster_tags {
 	}
 	foreach my $type (keys %$annotations_by_type_and_user) {
 		next if $type eq 'doctype';
-		if ($self->get_page_num() == 9 && $type eq 'diaryDate') {
-			undef;
-		}
+#		if ($self->{_page_data}{zooniverse_id} eq 'AWD000005g' && $type eq 'place') {
+#			undef;
+#		}
 		# for this tag type, who has the most tags. Use their tags to create the skeleton cluster layout
 		my $user_annotations_by_type_popularity = _num_tags_of_type($annotations_by_type_and_user->{$type});
 		my $first_user_for_this_type = 1;
@@ -226,9 +267,9 @@ sub cluster_tags {
 		}
 	}
 	foreach my $cluster_type (keys %{$self->{_clusters}}) {
-		if ($self->get_page_num() == 4 && $cluster_type eq 'diaryDate') {
-			undef;
-		}
+#		if ($self->get_page_num() == 4 && $cluster_type eq 'diaryDate') {
+#			undef;
+#		}
 		foreach my $cluster (@{$self->{_clusters}{$cluster_type}}) {
 			if (@{$cluster->{_annotations}} <= 1) {
 				my $annotation = $cluster->{_annotations}[0];
@@ -237,7 +278,9 @@ sub cluster_tags {
 				my $error = {
 					'type'		=> 'cluster_error; single_annotation_cluster',
 					'detail'	=> "annotation '$id' ($string) can't be clustered with any other annotations",
+					'annotation'=> $annotation->{_annotation_data},
 				};
+				# TODO should use an accessor to get the annotation data above
 				$self->data_error($error);
 			}
 		}
@@ -246,7 +289,7 @@ sub cluster_tags {
 
 sub _match_annotation_against_existing {
 	my ($self, $new_annotation) = @_;
-	if ($self->get_page_num() == 4 && $new_annotation->get_type() eq 'person') {
+	if ($self->get_page_num() == 16 && $new_annotation->get_type() eq 'place') {
 		undef;
 	}
 	# for each cluster for this type so far, try matching new tag to it
@@ -317,6 +360,11 @@ sub acceptable_distance {
 		$x_max = 12;
 		$y_max = 3;
 		$dist_max = 12;
+	}
+	elsif ($type eq 'place') {
+		$x_max = 10;
+		$y_max = 3;
+		$dist_max = 10;
 	}
 	elsif ($type eq 'diaryDate') {
 		$x_max = 15;

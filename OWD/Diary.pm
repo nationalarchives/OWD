@@ -51,6 +51,14 @@ sub load_classifications {
 	return $diary_return_val;
 }
 
+sub load_hashtags {
+	my ($self) = @_;
+	foreach my $page (@{$self->{_pages}}) {
+		$page->load_hashtags();
+	}
+	return 1;
+}
+
 sub get_status {
 	my ($self) = @_;
 	return $self->{_group_data}{state};
@@ -272,7 +280,7 @@ sub get_date_for {
 
 sub print_text_report {
 	my ($self, $fh) = @_;
-	print $fh $self->{_group_data}{zooniverse_id}." ".$self->{_group_data}{metadata}{source}."\n";
+	print $fh $self->{_group_data}{zooniverse_id}." ".$self->{_group_data}{metadata}{source}."\n".$self->{_group_data}{name}."\n";
 	print $fh $self->{_group_data}{stats}{total}." pages\n\n";
 	foreach my $page (@{$self->{_pages}}) {
 		my $doctype		= $page->get_doctype();
@@ -282,6 +290,15 @@ sub print_text_report {
 		}
 		else {
 			print $fh "Page $page_num (type $doctype) http://wd3.herokuapp.com/pages/",$page->get_zooniverse_id,'  ','-'x 10,"\n";
+			if (defined (my $hashtags = $page->get_hashtags())) {
+				if (keys %$hashtags > 0) {
+					print $fh "  Hashtags: ";
+					foreach my $hashtag (reverse sort {$hashtags->{$a} <=> $hashtags->{$b}} keys %$hashtags) {
+						print $fh "$hashtag ";
+					}
+					print $fh "\n";
+				}
+			}
 			# do we print the consensus data purely chronologically, or chronologically then categorised?
 			# try organising clusters by y-coordinates
 			my $chrono_clusters;
@@ -313,6 +330,47 @@ sub print_text_report {
 				}
 			}
 		}
+	}
+}
+
+sub publish_to_db {
+	my ($self) = @_;
+	# clear down any existing references to this diary in the DB
+	$self->{_processor}->get_output_db()->get_collection('page')->remove({'group_id' => $self->get_zooniverse_id});
+	foreach my $page (@{$self->{_pages}}) {
+		my $annotations = [];
+		my $output_obj = {
+			'zooniverse_id'		=> $page->get_zooniverse_id(),
+			'group_id'			=> $self->get_zooniverse_id(),
+			'page_num'			=> $page->get_page_num(),
+			'image_url'			=> $page->get_image_url(),
+		};
+		my $clusters_by_type = $page->get_clusters();
+		if (defined($clusters_by_type->{doctype}[0])) {
+			if (defined(my $consensus_annotation = $clusters_by_type->{doctype}[0]->get_consensus_annotation())) {
+				$output_obj->{type} = $consensus_annotation->get_string_value();
+			}
+			else {
+				$output_obj->{type} = 'unknown';
+			}
+		}
+		else {
+			undef;
+		}
+		foreach my $type (sort keys %$clusters_by_type) {
+			next if $type eq 'doctype';
+			foreach my $cluster (@{$clusters_by_type->{$type}}) {
+				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
+					push @$annotations, $consensus_annotation->{_annotation_data};
+				}
+				else {
+					undef;
+				}
+			}
+			undef;
+		}
+		$output_obj->{annotations} = $annotations;
+		$self->{_processor}->get_output_db()->get_collection('page')->insert($output_obj);
 	}
 }
 

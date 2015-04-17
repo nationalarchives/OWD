@@ -65,10 +65,32 @@ sub get_logging_db {
 	return $self->{logging_database};
 }
 
+sub set_tags_db {
+	my ($self, $db) = @_;
+	if ( ref($db) eq "MongoDB::Database") {
+		$self->{tags_database}	= $db;
+		return 1;
+	}
+	else {
+		return undef;
+	}
+}
+
+sub get_tags_db {
+	my ($self) = @_;
+	return $self->{tags_database};
+}
+
 sub get_error_collection {
 	my ($self) = @_;
 	my $log_db = $self->get_logging_db();
 	return $log_db->get_collection('error');
+}
+
+sub get_hashtags_collection {
+	my ($self) = @_;
+	my $hashtags_db = $self->get_tags_db();
+	return $hashtags_db->get_collection('discussions');
 }
 
 sub get_diary {
