@@ -188,6 +188,11 @@ sub get_string_value {
 		$string_value = $self->{_annotation_data}{standardised_note}{place};
 	}
 	elsif ($self->{_annotation_data}{type} eq 'person') {
+		foreach my $key (keys %{$self->{_annotation_data}{standardised_note}}) {
+			if (ref($self->{_annotation_data}{standardised_note}{$key}) eq 'ARRAY') {
+				undef;
+			}
+		}
 		if ($self->{_annotation_data}{standardised_note}{rank} ne '') {
 			$string_value = $self->{_annotation_data}{standardised_note}{rank};
 		}
@@ -214,7 +219,7 @@ sub get_string_value {
 		$string_value = $self->{_annotation_data}{standardised_note}{reference};
 	}
 	elsif ($self->{_annotation_data}{type} eq 'casualties') {
-		$string_value = "died: $self->{_annotation_data}{standardised_note}{died}\nkilled: $self->{_annotation_data}{standardised_note}{killed}\nmissing: $self->{_annotation_data}{standardised_note}{missing}\nprisoner: $self->{_annotation_data}{standardised_note}{prisoner}\nsick: $self->{_annotation_data}{standardised_note}{sick}\nwounded: $self->{_annotation_data}{standardised_note}{wounded}\n";
+		$string_value = "died: $self->{_annotation_data}{standardised_note}{died}; killed: $self->{_annotation_data}{standardised_note}{killed}; missing: $self->{_annotation_data}{standardised_note}{missing}; prisoner: $self->{_annotation_data}{standardised_note}{prisoner}; sick: $self->{_annotation_data}{standardised_note}{sick}; wounded: $self->{_annotation_data}{standardised_note}{wounded}";
 	}
 	elsif ($self->{_annotation_data}{type} eq 'unit') {
 		$string_value = $self->{_annotation_data}{standardised_note}{name};
@@ -475,6 +480,16 @@ sub _fix_known_errors {
 
 sub _data_consistent {
 	my ($self) = @_;
+	# first check if a confirmed db exists, which can store the results of QA work and list annotations that can be dropped/deleted
+	# after failing QA. If the DB doesn't exist, all annotations are treated equally.
+	if (ref($self->{_classification}->get_page()->get_diary()->get_processor()->get_confirmed_db()) eq 'MongoDB::Database') {
+		my $coll_delete = $self->{_classification}->get_page()->get_diary()->get_processor()->get_delete_collection();
+		my $obj_to_delete = $coll_delete->find_one({'annotation_id' => $self->{_annotation_data}{id}});
+		if (ref($obj_to_delete) eq 'HASH') {
+			return 0;
+		}
+	}
+	
 	my $annotation = $self->{_annotation_data};
 	if (defined $annotation->{type}) {
 		# unrecognised doctype

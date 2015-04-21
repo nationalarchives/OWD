@@ -5,6 +5,7 @@ use OWD::Page;
 
 my $debug = 2;
 my $date_lookup = {};
+my $place_lookup = {};
 
 my %month = (
 	"Jan" => 1,
@@ -62,6 +63,11 @@ sub load_hashtags {
 sub get_status {
 	my ($self) = @_;
 	return $self->{_group_data}{state};
+}
+
+sub get_processor() {
+	my ($self) = @_;
+	return $self->{_processor};
 }
 
 sub get_raw_tag_type_counts {
@@ -163,7 +169,7 @@ sub create_date_lookup {
 	foreach my $page (@{$self->{_pages}}) {
 		my $page_num = $page->get_page_num();
 		$date_lookup->{$page_num} = {};
-		my $page_date_lookup = $date_lookup->{$page_num}; # the section of the $date_lookup hash referncing the current page
+		my $page_date_lookup = $date_lookup->{$page_num}; # the section of the $date_lookup hash referencing the current page
 		my $page_anomalies = {}; # a hash for any anomalies and their y coordinates 
 		$page_date_lookup->{0}{friendly} = $current_date;
 		$page_date_lookup->{0}{sortable} = $current_sortable_date;
@@ -278,6 +284,79 @@ sub get_date_for {
 	return $date_lookup->{$page}{$closest_date_row_above};
 }
 
+sub create_place_lookup {
+	my ($self) = @_;
+	my $current_place = "";
+
+	#iterate through each page by ascending page number
+	foreach my $page (@{$self->{_pages}}) {
+		my $page_num = $page->get_page_num();
+		$place_lookup->{$page_num} = {};
+		my $page_place_lookup = $place_lookup->{$page_num}; # the section of the $place_lookup hash referencing the current page
+		my $page_anomalies = {}; # a hash for any anomalies and their y coordinates 
+		$page_place_lookup->{0} = $current_place;
+		if (defined $page->{_clusters}{place}) {
+			foreach my $cluster (sort { $a->{median_centroid}[1] <=> $b->{median_centroid}[1] } @{$page->{_clusters}{place}}) {
+				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
+					my $place_y_coord = $cluster->{median_centroid}[1];
+					if (ref($consensus_annotation) eq 'ARRAY') {
+						# we have multiple possible places for this cluster
+						# try looking them up in Geonames? Select the nearest to last known location
+						undef;
+					}
+					if (defined($page_place_lookup->{$place_y_coord})) {
+						# we already have a place for this page number and row.
+						if (ref($page_place_lookup->{$place_y_coord}) eq 'HASH' 
+							&& $page_place_lookup->{$place_y_coord} ne $consensus_annotation->get_string_value()) {
+							# if the row has a single place so far, and it's different from the one
+							# we've just found, convert this value to an array and deal with it when 
+							# the rest of the places for this page have been processed
+							my $value1 = $page_place_lookup->{$place_y_coord};
+							$page_place_lookup->{$place_y_coord} = 
+								[$value1, $consensus_annotation->get_string_value()];
+							next;
+						}
+						elsif (ref($page_place_lookup->{$place_y_coord}) eq 'ARRAY') {
+							# we have at least three dates for this row.
+							# Add the new date to the existing array for dealing with later
+							undef
+#							push @{$page_place_lookup->{$place_y_coord}}, {'friendly' => $consensus_annotation->get_string_value(), 'sortable' => get_sortable_date($consensus_annotation->get_string_value()), 'cluster' => $cluster};
+						}
+					}
+					else {
+						$page_place_lookup->{$place_y_coord} = $consensus_annotation->get_string_value();
+					}
+				}
+			}
+			my @rows = sort {$a <=> $b} keys %$page_place_lookup;
+			# resolve any instances of multiple places for a row here.
+			foreach my $row (@rows) {
+				if (ref($page_place_lookup->{$row}) eq 'ARRAY') {
+					undef;
+				}
+			}
+			# repopulate the array of rows in case it has changed
+			@rows = sort {$a <=> $b} keys %$page_place_lookup;
+			# get the highest row-numbered place on the page, this will be the first place on the 
+			# next page
+			my $highest_row_number = $rows[-1];
+			$current_place = $page_place_lookup->{$highest_row_number};
+		}
+	}
+	undef;
+}
+
+sub get_place_for {
+	my ($page, $row) = @_;
+	my $closest_place_row_above = 0;
+	foreach my $potential_row_above (keys %{$place_lookup->{$page}}) {
+		if ($potential_row_above <= $row && $potential_row_above > $closest_place_row_above) {
+			$closest_place_row_above = $potential_row_above;
+		} 
+	}
+	return $place_lookup->{$page}{$closest_place_row_above};
+}
+
 sub print_text_report {
 	my ($self, $fh) = @_;
 	print $fh $self->{_group_data}{zooniverse_id}." ".$self->{_group_data}{metadata}{source}."\n".$self->{_group_data}{name}."\n";
@@ -326,6 +405,56 @@ sub print_text_report {
 				foreach my $cluster (@{$chrono_clusters->{$y_coord}}) {
 					if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
 						print $fh "    ",$consensus_annotation->{_annotation_data}{type},":",$consensus_annotation->get_string_value," (",join(",",@{$consensus_annotation->get_coordinates()}),")\n";
+					}
+				}
+			}
+		}
+	}
+}
+
+sub print_tsv_report {
+	my ($self, $fh) = @_;
+	print $fh "#Unit\tPageNum\tDate\tPlace\tAnnotationType\tAnnotationValue\tHashtags\n";
+	foreach my $page (@{$self->{_pages}}) {
+		my $title 		= $self->{_group_data}{name};
+		my $doctype		= $page->get_doctype();
+		my $page_num	= $page->get_page_num();
+		my $date = get_date_for($page_num, 0);
+		my $place = get_place_for($page_num, 0);
+		my $current_date;
+		if (!defined($current_date) || $date->{friendly} ne $current_date) {
+			$current_date = $date->{friendly};
+		}
+		my @hashtags;
+		if (defined (my $hashtags = $page->get_hashtags())) {
+			@hashtags = keys %$hashtags;
+			print $fh "$title\t$page_num\t$current_date\t$place\thashtags\t",join(",",@hashtags),"\n" if (@hashtags > 0);
+		}
+		my $chrono_clusters;
+		my $date_boundaries;
+		foreach my $type (keys %{$page->{_clusters}}) {
+			if ($type eq 'diaryDate') {
+				foreach my $cluster (@{$page->{_clusters}{$type}}) {
+					if (ref($cluster) eq 'OWD::Cluster' && defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
+						$date_boundaries->{$consensus_annotation->get_string_value()} = ${$consensus_annotation->get_coordinates()}[1];
+					} 
+				}
+			}
+			next if $type eq 'diaryDate' or $type eq 'doctype'; # we've used these to create our date_lookup function already
+			foreach my $cluster (@{$page->{_clusters}{$type}}) {
+				push @{$chrono_clusters->{$cluster->{median_centroid}[1]}}, $cluster;
+			}
+		}
+		foreach my $y_coord (sort keys %$chrono_clusters) {
+			$date = get_date_for($page_num, $y_coord);
+			$place = get_place_for($page_num, $y_coord);
+			if (!defined($current_date) || $date->{friendly} ne $current_date) {
+				$current_date = $date->{friendly};
+			}
+			foreach my $cluster (@{$chrono_clusters->{$y_coord}}) {
+				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
+					if ((my $type = $consensus_annotation->get_type()) ne 'diaryDate') {
+						print $fh "$title\t$page_num\t$current_date\t$place\t$type\t",$consensus_annotation->get_string_value(),"\n";
 					}
 				}
 			}

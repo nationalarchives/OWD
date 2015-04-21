@@ -276,9 +276,10 @@ sub cluster_tags {
 				my $id = $annotation->get_id();
 				my $string = $annotation->get_string_value();
 				my $error = {
-					'type'		=> 'cluster_error; single_annotation_cluster',
-					'detail'	=> "annotation '$id' ($string) can't be clustered with any other annotations",
-					'annotation'=> $annotation->{_annotation_data},
+					'type'			=> 'cluster_error; single_annotation_cluster',
+					'detail'		=> "annotation '$id' ($string) can't be clustered with any other annotations",
+					'annotation'	=> $annotation->{_annotation_data},
+					'annotation_id'	=> $annotation->get_id(),
 				};
 				# TODO should use an accessor to get the annotation data above
 				$self->data_error($error);
@@ -289,7 +290,7 @@ sub cluster_tags {
 
 sub _match_annotation_against_existing {
 	my ($self, $new_annotation) = @_;
-	if ($self->get_page_num() == 16 && $new_annotation->get_type() eq 'place') {
+	if ($self->get_page_num() == 15 && $new_annotation->get_type() eq 'place') {
 		undef;
 	}
 	# for each cluster for this type so far, try matching new tag to it
@@ -362,9 +363,9 @@ sub acceptable_distance {
 		$dist_max = 12;
 	}
 	elsif ($type eq 'place') {
-		$x_max = 10;
+		$x_max = 20;
 		$y_max = 3;
-		$dist_max = 10;
+		$dist_max = 20;
 	}
 	elsif ($type eq 'diaryDate') {
 		$x_max = 15;

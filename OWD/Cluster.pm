@@ -171,7 +171,7 @@ sub establish_consensus {
 	if ($note_type eq 'SCALAR') {
 		my @values = reverse sort { $value_counts{$a} <=> $value_counts{$b} } keys %value_counts;
 		if ($value_counts{$values[0]} > 1) {
-			# not a lonely cluster, check if there's a tie
+			# more than one user agreed on a value, check if there was unanimity on the value 
 			if (defined($values[1])) {
 				# there are at least two opinions for this note field
 				if ($value_counts{$values[0]} > $value_counts{$values[1]}) {
@@ -199,14 +199,15 @@ sub establish_consensus {
 		}
 		else {
 			if (@values > 1) {
+				# there are several possible values with one vote each
 				$status_of_field = TIE_FOR_MOST_POPULAR_VALUE;
 				my $tied_score = $value_counts{$values[0]};
 				foreach my $value (@values) {
 					push @{$consensus_annotation->{standardised_note}}, $value if $value_counts{$value} == $tied_score;
 				}
-				push @$error, {
+				$error = {
 					'type'		=> 'cluster_error; value_tie',
-					'detail'	=> 'one of the fields in the cluster was a tie of two or more different values',
+					'detail'	=> 'there were multiple values for the cluster, but no value had the agreement of two or more users',
 				};
 			}
 			else {
@@ -215,6 +216,7 @@ sub establish_consensus {
 				$error = {
 					'type'				=> 'cluster_error; lonely_cluster',
 					'standardised_note'	=> $self->{_annotations}[0]->get_string_value(),
+					'annotation_id'		=> $self->{_annotations}[0]->get_id(),
 					'detail'			=> 'cluster consists of a single annotation only, not enough for a consensus',
 				};
 			}
@@ -282,6 +284,7 @@ sub establish_consensus {
 					push @$error, {
 						'type'		=> 'cluster_error; lonely_cluster',
 						'standardised_note'	=> $self->{_annotations}[0]->get_string_value(),
+						'annotation_id'		=> $self->{_annotations}[0]->get_id(),
 						'detail'	=> 'cluster consists of a single annotation only, not enough for a consensus',
 					};
 				}

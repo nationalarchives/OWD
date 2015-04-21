@@ -76,9 +76,35 @@ sub set_tags_db {
 	}
 }
 
+sub set_confirmed_db {
+	my ($self, $db) = @_;
+	if ( ref($db) eq "MongoDB::Database") {
+		$self->{confirmed_database}	= $db;
+		return 1;
+	}
+	else {
+		return undef;
+	}
+}
+
 sub get_tags_db {
 	my ($self) = @_;
 	return $self->{tags_database};
+}
+
+sub get_confirmed_db {
+	my ($self) = @_;
+	return $self->{confirmed_database};
+}
+
+sub get_confirmed_collection {
+	my ($self) = @_;
+	return $self->{confirmed_database}->get_collection('confirmed');
+}
+
+sub get_delete_collection {
+	my ($self) = @_;
+	return $self->{confirmed_database}->get_collection('delete');
 }
 
 sub get_error_collection {
