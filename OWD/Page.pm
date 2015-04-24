@@ -612,10 +612,24 @@ sub get_annotations_by_type_and_user {
 	return $annotations_by_type;
 }
 
-sub find_similar_nearby_tags {
-
-	my ($self, $type, $centre) = @_;
-	#my $annotations_by_type = 
+sub resolve_uncertainty {
+	my ($self) = @_;
+	foreach my $cluster_type (keys %{$self->{_clusters}}) {
+		foreach my $cluster (@{$self->{_clusters}{$cluster_type}}) {
+			if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
+				# It was possible to get a consensus
+				undef;
+				$consensus_annotation->resolve_disputes();
+				
+			}
+			else {
+				# There is no consensus annotation yet
+				undef;
+			}
+			undef;
+		}
+	}
+	undef;
 }
 
 sub data_error {

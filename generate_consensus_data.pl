@@ -35,18 +35,22 @@ my $diary = $owd->get_diary($diary_id);
 {
 	$diary_count++;
 	my $diary_id = $diary->get_zooniverse_id();
+	print "Processing diary $diary_id\n";
 	$owd->get_logging_db()->get_collection('error')->remove({"diary.group_id" => "$diary_id"});
 	print "$diary_count: ",$diary->get_docref()," (".$diary->get_zooniverse_id().")\n";
+	print "Loading classifications\n";
 	my $num_pages_with_classifications = $diary->load_classifications();
 	if ($diary->get_status() eq "complete") {
 		$diary->strip_multiple_classifications_by_single_user();
 		$diary->report_pages_with_insufficient_classifications();
 		$diary->load_hashtags();
+		print "Clustering tags\n";
 		$diary->cluster_tags();
+		print "Establishing consensus\n";
 		$diary->establish_consensus();
 		$diary->create_date_lookup();
 		$diary->create_place_lookup();
-#		$diary->reconcile_uncertainty();
+		$diary->resolve_uncertainty();
 		open my $text_report, ">", "output/$diary_id-text.txt";
 		$diary->print_text_report($text_report);
 		close $text_report;

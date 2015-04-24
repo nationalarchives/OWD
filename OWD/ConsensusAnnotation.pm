@@ -85,6 +85,121 @@ sub _data_consistent {
 	}
 }
 
+sub has_disputed_data {
+	my ($self) = @_;
+	if (ref($self->{_annotation_data}{type}) eq 'ARRAY') {
+		return 1;
+	}
+	else {
+		if (ref($self->{_annotation_data}{standardised_note}) eq 'HASH') {
+			foreach my $standardised_note_field (keys %{$self->{_annotation_data}{standardised_note}}) {
+				if (ref($self->{_annotation_data}{standardised_note}{$standardised_note_field}) eq 'ARRAY') {
+					return 1;
+				}
+			}
+			return 0;
+		}
+		elsif (ref($self->{_annotation_data}{standardised_note}) eq 'ARRAY') {
+			undef;
+		}
+		else {
+			return 0;
+		}
+	}
+}
+
+sub resolve_disputes {
+	my ($self) = @_;
+	if (ref($self->{_annotation_data}{type}) eq 'ARRAY') {
+		undef;
+	}
+	if (ref($self->{_annotation_data}{standardised_note}) eq 'HASH') {
+		# a multi value note
+		foreach my $standardised_note_field (keys %{$self->{_annotation_data}{standardised_note}}) {
+			if (ref($self->{_annotation_data}{standardised_note}{$standardised_note_field}) eq 'ARRAY') {
+				# disputed winning value
+				if ($self->{_annotation_data}{type} eq 'place') {
+					# if it's a PLACE annotation
+					if ($standardised_note_field eq 'location') {
+						if ($self->{_annotation_data}{coords}[0] < 12) {
+							$self->{_annotation_data}{standardised_note}{$standardised_note_field} = 'true';
+						}
+						else {
+							$self->{_annotation_data}{standardised_note}{$standardised_note_field} = 'false';
+						}
+					}
+					elsif (		$standardised_note_field eq 'id'
+							||	$standardised_note_field eq 'lat'
+							|| 	$standardised_note_field eq 'long'
+							|| 	$standardised_note_field eq 'name'
+							|| 	$standardised_note_field eq 'placeOption') {
+						# if this field is disputed, chances are we don't have enough annotations
+						$self->{_annotation_data}{standardised_note}{$standardised_note_field} = undef;
+					}
+					else {
+						# we missed out a place note field
+						undef;
+					}
+				}
+				elsif ($self->{_annotation_data}{type} eq 'person') {
+					if ($self->{_cluster}{_page}->get_page_num() == 40) {
+						undef;
+					}
+					my @values = sort @{$self->{_annotation_data}{standardised_note}{$standardised_note_field}};
+					if (@values > 2) {
+						# how do we choose from more than two values
+						undef;
+					}
+					else {
+						# if one value is blank or 'other' and the other isn't, use the other
+						if ($values[0] eq '' && $values[1] eq 'other') {
+							$self->{_annotation_data}{standardised_note}{$standardised_note_field} = '';
+						}
+						elsif ((List::MoreUtils::any {$_ ne '' && $_ ne 'other'} @values)
+								&& (List::MoreUtils::any {$_ eq '' || $_ eq 'other'} @values)) {
+									# if we get here, one value is blank or other, the other is a useful value
+							foreach my $value (@values) {
+								if ($value ne 'other' && $value ne '') {
+									$self->{_annotation_data}{standardised_note}{$standardised_note_field} = $value;
+								}
+							}
+						}
+						elsif ($standardised_note_field eq 'rank') {
+							if ((List::MoreUtils::any {$_ eq 'Second Lieutenant'} @values)
+								&& (List::MoreUtils::any {$_ eq 'Lieutenant'} @values)) {
+									# if we get here, most likely some people didn't notice the '2' superscripts
+									undef;
+									$self->{_annotation_data}{standardised_note}{$standardised_note_field} = 'Second Lieutenant';
+							}
+						}
+						elsif ($standardised_note_field eq 'reason') {
+							if ((List::MoreUtils::any {$_ eq 'returned_leave'} @values)
+									&& (List::MoreUtils::any {$_ eq 'returned_hospital'} @values)) {
+										$self->{_annotation_data}{standardised_note}{$standardised_note_field} = 'returned_leave';
+							}
+						}
+						else {
+							# how do we choose from this combo of values?
+							undef;
+							$self->{_annotation_data}{standardised_note}{$standardised_note_field} = '';
+						}
+					}
+				}
+				else {
+					undef;
+					$self->{_annotation_data}{standardised_note}{$standardised_note_field} = '';
+				}
+			}
+			if (ref($self->{_annotation_data}{standardised_note}{$standardised_note_field}) eq 'ARRAY') {
+				$self->{_annotation_data}{standardised_note}{$standardised_note_field} = '';
+			}
+		}
+	}
+	elsif (ref($self->{_annotation_data}{standardised_note}) eq 'ARRAY') {
+		undef;
+	}
+}
+
 sub DESTROY {
 	my ($self) = @_;
 	$self->{_page} = undef;

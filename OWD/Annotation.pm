@@ -81,6 +81,11 @@ my $free_text_fields = {
 	"person:surname"	=> 1,
 	"person:unit"		=> 1,
 	"unit:name"			=> 1,
+	"gridRef:gridref_a"	=> 1,
+	"gridRef:gridref_b"	=> 1,
+	"gridRef:gridref_c"	=> 1,
+	"gridRef:gridref_d"	=> 1,
+	"gridRef:gridref_e"	=> 1,
 };
 
 sub new {
@@ -127,7 +132,7 @@ sub new {
 			$data_has_been_modified = 0;
 			# only free text fields need their punctuation standardised (removal of multiple spaces,
 			# question marks, etc)
-			if ($_annotation->{type} eq "person" || $_annotation->{type} eq "place" || $_annotation->{type} eq "unit") {
+			if ($_annotation->{type} eq "person" || $_annotation->{type} eq "place" || $_annotation->{type} eq "unit" || $_annotation->{type} eq "gridRef") {
 				$data_has_been_modified = $obj->_standardise_punctuation(); # fix spaces and strip question marks
 			}
 			else {
@@ -356,6 +361,9 @@ sub _standardise_punctuation {
 #					print "Multiple caps: $standardised_field\n";
 					$standardised_field = ucfirst(lc($standardised_field));
 				}
+				if ($self->{_annotation_data}{type} eq 'gridRef') {
+					$standardised_field = uc($standardised_field);
+				}
 				if ($standardised_field =~ /\b(?<!')([a-z]+)\b/ 
 						&& $1 !~ /\ble\b/ && $1 !~ /\bl\b/) {
 #					print "No caps: $standardised_field\n";
@@ -371,7 +379,7 @@ sub _standardise_punctuation {
 			}
 			if ($standardised_note->{$note_key} ne $original_value) {
 				$note_has_been_modified = 1;
-				print "$original_value -> $standardised_note->{$note_key}\n" if $type_and_key ne 'person:first';
+				#print "$original_value -> $standardised_note->{$note_key}\n" if $type_and_key ne 'person:first';
 			}
 		}
 	}
@@ -654,15 +662,6 @@ sub _unabbreviate_unit_name {
 	if ($unit_name =~ m|\bAmmn\b|i) {
 		$unit_name =~ s|\bAmmn\b|Ammunition|i;
 	}
-	if ($unit_name =~ m|\bcav\.|i) {
-		$unit_name =~ s|\bcav\.|Cavalry|i;
-	}
-	if ($unit_name =~ m|\bcav\b|i) {
-		$unit_name =~ s|\bcav\b|Cavalry|i;
-	}
-	if ($unit_name =~ m|\bcavalry\b|i) {
-		$unit_name =~ s|\bcavalry\b|Cavalry|i;
-	}
 	if ($unit_name =~ m|\bbde\.|i) {
 		$unit_name =~ s|\bbde\.|Brigade|i;
 	}
@@ -678,20 +677,41 @@ sub _unabbreviate_unit_name {
 	if ($unit_name =~ m|\bbr(ig)?\b|i) {
 		$unit_name =~ s|\bbr(ig)?\b|Brigade|i;
 	}
-	if ($unit_name =~ m|\bam +coln?\b|i) {
-		$unit_name =~ s|\bam +coln?\b|Ammunition Column|;
+	if ($unit_name =~ m|\bamm? +coln?\b|i) {
+		$unit_name =~ s|\bamm? +coln?\b|Ammunition Column|;
 	}
-	if ($unit_name =~ m|\bbty\b|i) {
-		$unit_name =~ s|\bbty\b|Battery|i;
+	if ($unit_name =~ m|\bbatt\b.*(r[fh]a\|artillery)|i) {
+		$unit_name =~ s|\bbatt[\.\b]|Battery|i;
+	}
+	if ($unit_name =~ m|\bbatt\b.*(r[fh]a\|artillery)|i) {
+		$unit_name =~ s|\bbatt\b|Battery|i;
 	}
 	if ($unit_name =~ m|\bbatt\b|i) {
-		$unit_name =~ s|\bbatt\b|Battery|i;
+		$unit_name =~ s|\bbatt\b|Battalion|i;
+	}
+	if ($unit_name =~ m|\bbattn\b|i) {
+		$unit_name =~ s|\bbattn\b|Battalion|i;
 	}
 	if ($unit_name =~ m|\bbattery\b|i) {
 		$unit_name =~ s|\bbattery\b|Battery|i;
 	}
+	if ($unit_name =~ m|\bbty\b|i) {
+		$unit_name =~ s|\bbty\b|Battery|i;
+	}
+	if ($unit_name =~ m|\bcav\.|i) {
+		$unit_name =~ s|\bcav\.|Cavalry|i;
+	}
+	if ($unit_name =~ m|\bcav\b|i) {
+		$unit_name =~ s|\bcav\b|Cavalry|i;
+	}
+	if ($unit_name =~ m|\bcavalry\b|i) {
+		$unit_name =~ s|\bcavalry\b|Cavalry|i;
+	}
 	if ($unit_name =~ m|\bdivn?\b|i) {
 		$unit_name =~ s|\bdivn?\b|Division|i;
+	}
+	if ($unit_name =~ m|\bdiviion?\b|i) {
+		$unit_name =~ s|\bdiviion?\b|Division|i;
 	}
 	if ($unit_name =~ m|\bd[ie]vision\b|i) {
 		$unit_name =~ s|\bd[ie]vision\b|Division|i;
@@ -729,10 +749,27 @@ sub _unabbreviate_unit_name {
 	if ($unit_name =~ m/\br\.?i\.?r\.?\b/i) {
 		$unit_name =~ s/\br\.?i\.?r\.?\b/Royal Irish Regiment/i
 	}
+	if ($unit_name =~ m/["'][A-Z]/i) {
+		$unit_name =~ s/["']//g;
+	}
+
 	if ($unit_name ne $original_unit_name) {
 		print "Unit name: '$original_unit_name' changed to '$unit_name'\n";
 	}
 	return $unit_name;
+}
+
+sub ignore_place_georeference {
+	# There was a bug in the early georeferencing code that means the earlier georeferences
+	# were often of the wrong placename. Use the date of the annotation to determine whether
+	# to ignore any georeference information present.
+	my ($self) = @_;
+	if ($self->{_cluster}->get_first_annotation()->{_classification}{_classification_data}{created_at}->epoch() < 1393632000) {
+		return 0;
+	}
+	else {
+		return 1;
+	}
 }
 
 sub data_error {

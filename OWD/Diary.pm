@@ -414,11 +414,12 @@ sub print_text_report {
 
 sub print_tsv_report {
 	my ($self, $fh) = @_;
-	print $fh "#Unit\tPageNum\tDate\tPlace\tAnnotationType\tAnnotationValue\tHashtags\n";
+	print $fh "#Unit\tPageNum\tPageID\tDate\tPlace\tAnnotationType\tAnnotationValue\n";
 	foreach my $page (@{$self->{_pages}}) {
 		my $title 		= $self->{_group_data}{name};
 		my $doctype		= $page->get_doctype();
 		my $page_num	= $page->get_page_num();
+		my $zooniverse_id	= $page->get_zooniverse_id();
 		my $date = get_date_for($page_num, 0);
 		my $place = get_place_for($page_num, 0);
 		my $current_date;
@@ -454,12 +455,20 @@ sub print_tsv_report {
 			foreach my $cluster (@{$chrono_clusters->{$y_coord}}) {
 				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
 					if ((my $type = $consensus_annotation->get_type()) ne 'diaryDate') {
-						print $fh "$title\t$page_num\t$current_date\t$place\t$type\t",$consensus_annotation->get_string_value(),"\n";
+						print $fh "$title\t$page_num\t$zooniverse_id\t$current_date\t$place\t$type\t",$consensus_annotation->get_string_value(),"\n";
 					}
 				}
 			}
 		}
 	}
+}
+
+sub resolve_uncertainty {
+	my ($self) = @_;
+	foreach my $page (@{$self->{_pages}}) {
+		$page->resolve_uncertainty();
+	}
+	undef;
 }
 
 sub publish_to_db {
