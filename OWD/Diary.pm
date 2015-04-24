@@ -399,14 +399,10 @@ sub print_text_report {
 			my $current_date;
 			foreach my $y_coord (sort keys %$chrono_clusters) {
 				my $date = get_date_for($page_num, $y_coord);
-				if (ref($date_boundaries) ne 'HASH' || !defined $date_boundaries->{$date->{friendly}}) {
-					print "\$date_boundaries is not a hash, or doesn't have a friendly index: ";
-					print Dumper $date_boundaries;
-					print "\$date->{friendly} = ", $date->{friendly}, "\n";
-					<STDIN>;
-					undef;
-				}
 				if (!defined($current_date) || $date->{friendly} ne $current_date) {
+					if (!defined($date_boundaries->{$date->{friendly}})) {
+						$date_boundaries->{$date->{friendly}} = 0;
+					}
 					print $fh "  $date->{friendly} ",$date_boundaries->{$date->{friendly}},"\n";
 					$current_date = $date->{friendly};
 				}

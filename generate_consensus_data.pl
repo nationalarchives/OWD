@@ -7,7 +7,7 @@ use Data::Dumper;
 
 my $debug = 1;
 my $war_diary_server	= "localhost:27017";
-my $war_diary_db_name	= "war_diary_2014-11-24";	# the raw source data
+my $war_diary_db_name	= "war_diary_2015-04-20";	# the raw source data
 my $war_diary_output_db	= "war_diary_export";		# the exported consensus data
 my $war_diary_logging_db = "war_diary_logging";		# the logging db, recording any errors in clustering and consensus finding
 my $war_diary_tags		= "ouroboros_production";	# the raw Talk pages (for hash tags and page talk)
@@ -30,8 +30,8 @@ $owd->set_confirmed_db($confirmed_db);
 my $total_raw_tag_counts;
 my $diary_count = 0;
 my $diary_id = "GWD0000002";
-#while (my $diary = $owd->get_diary())
-my $diary = $owd->get_diary($diary_id);
+while (my $diary = $owd->get_diary())
+#my $diary = $owd->get_diary($diary_id);
 {
 	$diary_count++;
 	my $diary_id = $diary->get_zooniverse_id();
