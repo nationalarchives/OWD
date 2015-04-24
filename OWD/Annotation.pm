@@ -121,7 +121,11 @@ sub new {
 		if (ref($obj->{_annotation_data}{standardised_note}) eq 'HASH'
 				&& ($obj->{_annotation_data}{standardised_note}{surname} =~ /H[^ ]* M[^ ]* The King/i
 				|| $obj->{_annotation_data}{standardised_note}{first} =~ /H[^ ]* M[^ ]* The King/i
-				|| $obj->{_annotation_data}{standardised_note}{first} =~ /King George V/i)) {
+				|| $obj->{_annotation_data}{standardised_note}{first} =~ /King George V/i
+				|| $obj->{_annotation_data}{standardised_note}{surname} =~ /the king/i
+				|| ($obj->{_annotation_data}{standardised_note}{surname} =~ /^george$/i
+					&& $obj->{_annotation_data}{standardised_note}{first} =~ /^king$/i)
+				)) {
 			$obj->{_annotation_data}{standardised_note}{rank} = 'other';
 			$obj->{_annotation_data}{standardised_note}{first} = 'George';
 			$obj->{_annotation_data}{standardised_note}{surname} = 'H M The King';
@@ -754,7 +758,7 @@ sub _unabbreviate_unit_name {
 	}
 
 	if ($unit_name ne $original_unit_name) {
-		print "Unit name: '$original_unit_name' changed to '$unit_name'\n";
+		#print "Unit name: '$original_unit_name' changed to '$unit_name'\n";
 	}
 	return $unit_name;
 }

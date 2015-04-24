@@ -2,6 +2,7 @@ package OWD::Diary;
 use strict;
 use warnings;
 use OWD::Page;
+use Data::Dumper;
 
 my $debug = 2;
 my $date_lookup = {};
@@ -238,7 +239,7 @@ sub create_date_lookup {
 					# than the immediately preceeding row. If they both are, select the earlier one
 					# on the basis that this case is often caused by an entry like "15th-30th Sep"
 					my $previous_row = _get_previous_date_row_number($page_date_lookup,$row,\@rows);
-					my $qualified_dates;
+					my $qualified_dates = [];
 					foreach my $user_contributed_date (@{$page_date_lookup->{$row}}) {
 						if (ref($user_contributed_date) ne "HASH" || ref($page_date_lookup->{$previous_row}) ne "HASH") {
 							undef;
@@ -398,6 +399,13 @@ sub print_text_report {
 			my $current_date;
 			foreach my $y_coord (sort keys %$chrono_clusters) {
 				my $date = get_date_for($page_num, $y_coord);
+				if (ref($date_boundaries) ne 'HASH' || !defined $date_boundaries->{$date->{friendly}}) {
+					print "\$date_boundaries is not a hash, or doesn't have a friendly index: ";
+					print Dumper $date_boundaries;
+					print "\$date->{friendly} = ", $date->{friendly}, "\n";
+					<STDIN>;
+					undef;
+				}
 				if (!defined($current_date) || $date->{friendly} ne $current_date) {
 					print $fh "  $date->{friendly} ",$date_boundaries->{$date->{friendly}},"\n";
 					$current_date = $date->{friendly};

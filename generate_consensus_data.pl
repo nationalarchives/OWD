@@ -29,8 +29,8 @@ $owd->set_confirmed_db($confirmed_db);
 
 my $total_raw_tag_counts;
 my $diary_count = 0;
-my $diary_id = "GWD0000001";
-#while (my $diary = $owd->get_diary()) {
+my $diary_id = "GWD0000002";
+#while (my $diary = $owd->get_diary())
 my $diary = $owd->get_diary($diary_id);
 {
 	$diary_count++;
