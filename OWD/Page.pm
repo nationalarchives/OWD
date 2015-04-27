@@ -21,11 +21,14 @@ sub new {
 
 sub load_classifications {
 	my ($self) = @_;
+	my $page = $self->get_page_num();
+#	print "page $page\n"; # DEBUG DELETE
 	my $_classifications = [];
 	my $cur_classifications = 
 		$self->{_diary}->{_processor}->{coll_classifications}->find(
 			{'subjects.zooniverse_id' => $self->{_page_data}->{zooniverse_id} }
 		);
+	$cur_classifications->fields({'annotations'=>1,'subjects'=>1,'updated_at'=>1,'user_ip'=>1,'user_name'=>1});
 	if ($cur_classifications->has_next) {
 		while (my $classification = $cur_classifications->next) {
 			push @$_classifications, OWD::Classification->new($self,$classification);
@@ -51,9 +54,6 @@ sub load_hashtags {
 				while ($comment->{body} =~ /(#\w+)/g) {
 					$_hashtags->{$1}++;
 				}
-			}
-			if (keys %$_hashtags > 0) {
-				undef;
 			}
 		}
 		$self->{_hashtags} = $_hashtags;
@@ -242,9 +242,6 @@ sub cluster_tags {
 	}
 	foreach my $type (keys %$annotations_by_type_and_user) {
 		next if $type eq 'doctype';
-#		if ($self->{_page_data}{zooniverse_id} eq 'AWD000005g' && $type eq 'place') {
-#			undef;
-#		}
 		# for this tag type, who has the most tags. Use their tags to create the skeleton cluster layout
 		my $user_annotations_by_type_popularity = _num_tags_of_type($annotations_by_type_and_user->{$type});
 		my $first_user_for_this_type = 1;
@@ -267,9 +264,6 @@ sub cluster_tags {
 		}
 	}
 	foreach my $cluster_type (keys %{$self->{_clusters}}) {
-#		if ($self->get_page_num() == 4 && $cluster_type eq 'diaryDate') {
-#			undef;
-#		}
 		foreach my $cluster (@{$self->{_clusters}{$cluster_type}}) {
 			if (@{$cluster->{_annotations}} <= 1) {
 				my $annotation = $cluster->{_annotations}[0];
@@ -290,9 +284,6 @@ sub cluster_tags {
 
 sub _match_annotation_against_existing {
 	my ($self, $new_annotation) = @_;
-	if ($self->get_page_num() == 15 && $new_annotation->get_type() eq 'place') {
-		undef;
-	}
 	# for each cluster for this type so far, try matching new tag to it
 	# find the most similar nearby tag. If there aren't any, start a new cluster.
 	my $type = $new_annotation->get_type();
@@ -333,7 +324,6 @@ sub _match_annotation_against_existing {
 				}
 			}
 			$selected_cluster = $best_cluster_so_far->{number};
-			undef;
 		}
 		if (defined $selected_cluster) {
 			# if we get to here, though there were nearby clusters, they were too different to be able
@@ -403,34 +393,6 @@ sub distance {
 	return sqrt( ( ($coord1->[0] - $coord2->[0])**2 ) + ( ($coord1->[1] - $coord2->[1])**2) );
 }
 
-#sub similar_enough {
-#	# deprecated in favour of similarity() which returns a similarity score for the two strings,
-#	# rather than a simmple 0/1 true/false.
-#	my ($type, $string1, $string2) = @_;
-#	my $lc_string1 = lc($string1);
-#	my $lc_string2 = lc($string2);
-#	if ($type eq 'activity') {
-#		# don't bother checking for matching activity type, the selection of values is discrete and
-#		# there are lots of disputes. Proximity is good enough.
-#		return 1;
-#	}
-#	else {
-#		my $max_lev_score;
-#		if (length($string1) < 4) {
-#			$max_lev_score = 0;
-#		}
-#		else {
-#			$max_lev_score = length($string1)/2;
-#		}
-#		if (Text::LevenshteinXS::distance($lc_string1,$lc_string2) > $max_lev_score) {
-#			return 0;
-#		}
-#		else {
-#			return 1;
-#		}
-#	}
-#}
-
 sub similarity {
 	my ($type, $cluster_annotation, $new_annotation) = @_;
 	my ($score,$length);
@@ -463,9 +425,6 @@ sub similarity {
 
 sub establish_consensus {
 	my ($self) = @_;
-	if ($self->get_page_num() == 4) {
-		undef;
-	}
 	foreach my $type (keys %{$self->{_clusters}}) {
 		foreach my $cluster (@{$self->{_clusters}{$type}}) {
 			$cluster->establish_consensus();
@@ -618,18 +577,14 @@ sub resolve_uncertainty {
 		foreach my $cluster (@{$self->{_clusters}{$cluster_type}}) {
 			if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
 				# It was possible to get a consensus
-				undef;
 				$consensus_annotation->resolve_disputes();
-				
 			}
 			else {
 				# There is no consensus annotation yet
 				undef;
 			}
-			undef;
 		}
 	}
-	undef;
 }
 
 sub data_error {

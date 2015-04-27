@@ -232,7 +232,6 @@ sub establish_consensus {
 			if ($status_of_field < PLURALITY_CONSENSUS) {
 				$enough_consensus = 0;  
 			}
-			undef;
 		}
 	}
 	else {
@@ -240,6 +239,7 @@ sub establish_consensus {
 		# on all keys, for each annotation type, a core set of fields are important, if there is no
 		# consensus on (for example) the 'ui-id-1' accidental place field, no need to worry or flag it
 		# as a lonely cluster
+		my $is_lonely_cluster = 0;
 		foreach my $key (keys %value_counts) {
 			my @values = reverse sort { $value_counts{$key}{$a} <=> $value_counts{$key}{$b} } keys %{$value_counts{$key}};
 			if ($value_counts{$key}{$values[0]} > 1) {
@@ -280,15 +280,16 @@ sub establish_consensus {
 					};
 				}
 				else {
+					$is_lonely_cluster = 1;
 					$status_of_field->{$key} = LONE_USER_SUBMITTED;
-					push @$error, {
-						'type'		=> 'cluster_error; lonely_cluster',
-						'standardised_note'	=> $self->{_annotations}[0]->get_string_value(),
-						'annotation_id'		=> $self->{_annotations}[0]->get_id(),
-						'detail'	=> 'cluster consists of a single annotation only, not enough for a consensus',
-					};
 				}
 			}
+			push @$error, {
+				'type'		=> 'cluster_error; lonely_cluster',
+				'standardised_note'	=> $self->{_annotations}[0]->get_string_value(),
+				'annotation_id'		=> $self->{_annotations}[0]->get_id(),
+				'detail'	=> 'cluster consists of a single annotation only, not enough for a consensus',
+			} if $is_lonely_cluster;
 		}
 		# Check here if there was enough consensus to make a meaningful consensus annotation
 		if (defined($core_consensus_fields->{ $type })) {

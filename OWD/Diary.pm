@@ -30,6 +30,7 @@ sub new {
 	$_diary->{_processor}	= $_processor;
 	my $subjects_ref = [];	# an array of subjects (pages) within the diary, sorted by page number
 	my $cur_subjects = $_processor->{coll_subjects}->find({"group.zooniverse_id" => $_group->{zooniverse_id}});
+	$cur_subjects->fields({'classification_count'=>1,'group'=>1,'location'=>1,'metadata'=>1,'state'=>1,'zooniverse_id'=>1});
 	$cur_subjects->sort({"metadata.page_number" => 1});
 	if ($cur_subjects->has_next) {
 		while (my $subject = $cur_subjects->next) {
@@ -44,7 +45,6 @@ sub load_classifications {
 	my ($self) = @_;
 	my $diary_return_val = 0;
 	foreach my $page (@{$self->{_pages}}) {
-		#print "  page $page->{_page_data}{metadata}{page_number}\n" if ($debug > 1);
 		my $return_val = $page->load_classifications();
 		if ($return_val) {
 			$diary_return_val++;
@@ -344,7 +344,6 @@ sub create_place_lookup {
 			$current_place = $page_place_lookup->{$highest_row_number};
 		}
 	}
-	undef;
 }
 
 sub get_place_for {
@@ -418,7 +417,7 @@ sub print_text_report {
 
 sub print_tsv_report {
 	my ($self, $fh) = @_;
-	print $fh "#Unit\tPageNum\tPageID\tDate\tPlace\tAnnotationType\tAnnotationValue\n";
+	print $fh "#Unit\tPageNum\tPageID\tPageType\tDate\tPlace\tAnnotationType\tAnnotationValue\n";
 	foreach my $page (@{$self->{_pages}}) {
 		my $title 		= $self->{_group_data}{name};
 		my $doctype		= $page->get_doctype();
@@ -433,7 +432,7 @@ sub print_tsv_report {
 		my @hashtags;
 		if (defined (my $hashtags = $page->get_hashtags())) {
 			@hashtags = keys %$hashtags;
-			print $fh "$title\t$page_num\t$current_date\t$place\thashtags\t",join(",",@hashtags),"\n" if (@hashtags > 0);
+			print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$current_date\t$place\thashtags\t",join(",",@hashtags),"\n" if (@hashtags > 0);
 		}
 		my $chrono_clusters;
 		my $date_boundaries;
@@ -459,7 +458,7 @@ sub print_tsv_report {
 			foreach my $cluster (@{$chrono_clusters->{$y_coord}}) {
 				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
 					if ((my $type = $consensus_annotation->get_type()) ne 'diaryDate') {
-						print $fh "$title\t$page_num\t$zooniverse_id\t$current_date\t$place\t$type\t",$consensus_annotation->get_string_value(),"\n";
+						print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$current_date\t$place\t$type\t",$consensus_annotation->get_string_value(),"\n";
 					}
 				}
 			}
@@ -472,7 +471,6 @@ sub resolve_uncertainty {
 	foreach my $page (@{$self->{_pages}}) {
 		$page->resolve_uncertainty();
 	}
-	undef;
 }
 
 sub publish_to_db {

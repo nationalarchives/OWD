@@ -142,9 +142,6 @@ sub resolve_disputes {
 					}
 				}
 				elsif ($self->{_annotation_data}{type} eq 'person') {
-					if ($self->{_cluster}{_page}->get_page_num() == 40) {
-						undef;
-					}
 					my @values = sort @{$self->{_annotation_data}{standardised_note}{$standardised_note_field}};
 					if (@values > 2) {
 						# how do we choose from more than two values
@@ -168,7 +165,6 @@ sub resolve_disputes {
 							if ((List::MoreUtils::any {$_ eq 'Second Lieutenant'} @values)
 								&& (List::MoreUtils::any {$_ eq 'Lieutenant'} @values)) {
 									# if we get here, most likely some people didn't notice the '2' superscripts
-									undef;
 									$self->{_annotation_data}{standardised_note}{$standardised_note_field} = 'Second Lieutenant';
 							}
 						}
@@ -180,13 +176,11 @@ sub resolve_disputes {
 						}
 						else {
 							# how do we choose from this combo of values?
-							undef;
 							$self->{_annotation_data}{standardised_note}{$standardised_note_field} = '';
 						}
 					}
 				}
 				else {
-					undef;
 					$self->{_annotation_data}{standardised_note}{$standardised_note_field} = '';
 				}
 			}

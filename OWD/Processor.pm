@@ -20,7 +20,8 @@ sub set_database {
 		$self->{coll_groups}	= $db->get_collection("war_diary_groups");
 		$self->{coll_subjects}	= $db->get_collection("war_diary_subjects");
 		$self->{coll_classifications}	= $db->get_collection("war_diary_classifications");
-		my $cur_groups = $self->{coll_groups}->find();
+		my $cur_groups = $self->{coll_groups}->find({});
+		$cur_groups->fields({'metadata' => 1,'name' => 1,'state' => 1,'stats' => 1,'zooniverse_id' => 1});
 		if ($cur_groups->has_next) {
 			while (my $group = $cur_groups->next) {
 				push @$groups_ref, $group;

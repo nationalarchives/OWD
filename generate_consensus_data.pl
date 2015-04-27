@@ -5,9 +5,10 @@ use OWD::Processor;
 use MongoDB;
 use Data::Dumper;
 
+# db connection strings
 my $debug = 1;
 my $war_diary_server	= "localhost:27017";
-my $war_diary_db_name	= "war_diary_2015-04-20";	# the raw source data
+my $war_diary_db_name	= "war_diary_2014-11-24";	# the raw source data
 my $war_diary_output_db	= "war_diary_export";		# the exported consensus data
 my $war_diary_logging_db = "war_diary_logging";		# the logging db, recording any errors in clustering and consensus finding
 my $war_diary_tags		= "ouroboros_production";	# the raw Talk pages (for hash tags and page talk)
@@ -21,7 +22,8 @@ my $tag_db		= $client->get_database($war_diary_tags);
 my $confirmed_db= $client->get_database($war_diary_confirmed);
 
 my $owd = OWD::Processor->new();
-$owd->set_database($db);
+$owd->set_database($db); # this sets up the main DB connection, but also loads Group (diary-level) data 
+						 # into the Processor object
 $owd->set_output_db($output_db);
 $owd->set_logging_db($logging_db);
 $owd->set_tags_db($tag_db);
@@ -29,16 +31,21 @@ $owd->set_confirmed_db($confirmed_db);
 
 my $total_raw_tag_counts;
 my $diary_count = 0;
-my $diary_id = "GWD0000002";
+my $diary_id = "GWD0000006";
+# OWD::Processor::get_diary() fetches the requested diary (or iterates through all the diaries in the DB if
+# called with an empty parameter list). It loads the diary data, then loads page data too
 while (my $diary = $owd->get_diary())
 #my $diary = $owd->get_diary($diary_id);
 {
 	$diary_count++;
 	my $diary_id = $diary->get_zooniverse_id();
 	print "Processing diary $diary_id\n";
+	# clear down the log db for this diary ID
 	$owd->get_logging_db()->get_collection('error')->remove({"diary.group_id" => "$diary_id"});
+	$owd->get_logging_db()->get_collection('log')->remove({"diary.group_id" => "$diary_id"});
 	print "$diary_count: ",$diary->get_docref()," (".$diary->get_zooniverse_id().")\n";
 	print "Loading classifications\n";
+	# OWD::Diary::load_classifications() iterates through each page of the current diary loading classifications
 	my $num_pages_with_classifications = $diary->load_classifications();
 	if ($diary->get_status() eq "complete") {
 		$diary->strip_multiple_classifications_by_single_user();
@@ -48,7 +55,9 @@ while (my $diary = $owd->get_diary())
 		$diary->cluster_tags();
 		print "Establishing consensus\n";
 		$diary->establish_consensus();
+		print "Creating date lookup\n";
 		$diary->create_date_lookup();
+		print "Creating place lookup\n";
 		$diary->create_place_lookup();
 		$diary->resolve_uncertainty();
 		open my $text_report, ">", "output/$diary_id-text.txt";

@@ -28,6 +28,7 @@ my $valid_annotation_types = {
 	'date'		=> 1,
 	'mapRef'	=> 1,
 	'gridRef'	=> 1,
+	'strength'	=> 1,
 };
 
 my $valid_note_fields = {
@@ -96,6 +97,9 @@ sub new {
 	# - different but valid ways of representing the same thing (like unit full names vs abbreviations)
 	# - users finding different ways of representing uncertainty
 
+	if ($_classification->{_page}{_page_data}{metadata}{page_number} == 13 && $_annotation->{type} eq 'person') {
+		undef; # DEBUG DELETE
+	}
 	my $obj = bless {
 		'_classification'		=> $_classification,
 		'_annotation_data'		=> $_annotation,
@@ -230,6 +234,9 @@ sub get_string_value {
 	elsif ($self->{_annotation_data}{type} eq 'casualties') {
 		$string_value = "died: $self->{_annotation_data}{standardised_note}{died}; killed: $self->{_annotation_data}{standardised_note}{killed}; missing: $self->{_annotation_data}{standardised_note}{missing}; prisoner: $self->{_annotation_data}{standardised_note}{prisoner}; sick: $self->{_annotation_data}{standardised_note}{sick}; wounded: $self->{_annotation_data}{standardised_note}{wounded}";
 	}
+	elsif ($self->{_annotation_data}{type} eq 'strength') {
+		$string_value = "officer: $self->{_annotation_data}{standardised_note}{officer}; nco: $self->{_annotation_data}{standardised_note}{nco}; other: $self->{_annotation_data}{standardised_note}{other}";
+	}
 	elsif ($self->{_annotation_data}{type} eq 'unit') {
 		$string_value = $self->{_annotation_data}{standardised_note}{name};
 	}
@@ -352,6 +359,10 @@ sub _standardise_punctuation {
 									|| $token =~ m/^[lxvi]+$/i) {
 								# do nothing.
 							}
+							elsif ($token !~ m/^[a-z]+$/i) {
+								# do nothing
+								undef;
+							}
 							else {
 								$token = ucfirst(lc($token)) if $token =~ /^[a-z]/i;
 							}
@@ -435,7 +446,6 @@ sub _fix_known_errors {
 				'type'		=> 'annotation_error; day_of_month_too_high',
 				'detail'	=> $annotation->{id}.' has an invalid date: \''.$annotation->{standardised_note}.'\'',
 			};
-			undef;
 			return 0;
 		}
 	}
@@ -446,7 +456,7 @@ sub _fix_known_errors {
 		if ($annotation->{standardised_note}{unit} ne '') {
 			$annotation->{standardised_note}{unit} = _unabbreviate_unit_name($annotation->{standardised_note}{unit});
 		}					
-		# tidy usernames by: enforcing rules:
+		# tidy names by: enforcing rules:
 		# - initials in upper case, single spaced, no full stops, and remove titles (Sir, Hon, etc)
 		$annotation->{standardised_note}{first} = _tidy_user_entry($annotation->{standardised_note}{first}, "person:first");
 		$annotation->{standardised_note}{surname} = _tidy_user_entry($annotation->{standardised_note}{surname}, "person:surname");
@@ -492,7 +502,7 @@ sub _fix_known_errors {
 
 sub _data_consistent {
 	my ($self) = @_;
-	# first check if a confirmed db exists, which can store the results of QA work and list annotations that can be dropped/deleted
+	# first check if a 'confirmed' db exists, which can store the results of QA work and list annotations that can be dropped/deleted
 	# after failing QA. If the DB doesn't exist, all annotations are treated equally.
 	if (ref($self->{_classification}->get_page()->get_diary()->get_processor()->get_confirmed_db()) eq 'MongoDB::Database') {
 		my $coll_delete = $self->{_classification}->get_page()->get_diary()->get_processor()->get_delete_collection();
@@ -534,14 +544,13 @@ sub _data_consistent {
 				$self->data_error($error);
 				return 0;
 			}
-			if ($annotation->{note} !~ /^\d{1,2} [a-z]{3} \d{4}$/i) {
+			if ($annotation->{note} !~ /^\d{1,2} [a-z]{3,9} \d{4}$/i) {
 				my $error = {
 					'type'		=> 'annotation_error; invalid diaryDate format',
 					'detail'	=> '\''.$annotation->{note}.'\' doesn\'t match expected date format \'dd mmmm yyyy\'',
 				};
 				$self->data_error($error);
 				return 0;
-				undef;
 			}
 		}
 		elsif ($annotation->{type} eq "date") {
@@ -561,7 +570,6 @@ sub _data_consistent {
 				};
 				$self->data_error($error);
 				return 0;
-				undef;
 			}
 		}
 	}
@@ -590,6 +598,21 @@ sub _tidy_user_entry {
 			}
 			if ($string =~ /^[A-Z]{2,4}$/) {
 				$string =~ s/([A-Z])/$1 /g; # convert "ABC" format initials to "A B C " format
+				$string = _tidy_user_entry($string, $field_name);
+			}
+			if ($string =~ /(?:\b[a-z]\b ?)+$/) {
+				my @substring = split / /,$string;
+				my $replacement_string = '';
+				foreach my $substring (@substring) {
+					if ($substring =~ /^[a-z]$/) {
+						$replacement_string .= uc($substring)." ";
+					}
+					else {
+						$replacement_string .= $substring." ";
+					}
+				}
+				$string = $replacement_string;
+#				$string = uc $string; # uppercase all initials
 				$string = _tidy_user_entry($string, $field_name);
 			}
 			if ($string =~ /^(?:\b[a-z]\b ?)+$/) {
