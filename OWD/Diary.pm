@@ -4,7 +4,7 @@ use warnings;
 use OWD::Page;
 use Data::Dumper;
 
-my $debug = 2;
+my $debug = 3;
 my $date_lookup = {};
 my $place_lookup = {};
 
@@ -42,9 +42,11 @@ sub new {
 }
 
 sub load_classifications {
+	print "OWD::Diary::load_classifications() called\n" if $debug > 2;
 	my ($self) = @_;
 	my $diary_return_val = 0;
 	foreach my $page (@{$self->{_pages}}) {
+		print "  page ", $page->get_page_num(), "\n";
 		my $return_val = $page->load_classifications();
 		if ($return_val) {
 			$diary_return_val++;
@@ -363,6 +365,9 @@ sub print_text_report {
 	print $fh $self->{_group_data}{stats}{total}." pages\n\n";
 	foreach my $page (@{$self->{_pages}}) {
 		my $doctype		= $page->get_doctype();
+		if (!defined $doctype) {
+			undef;
+		}
 		my $page_num	= $page->get_page_num();
 		if ($doctype eq 'cover' || $doctype eq 'blank') {
 			print $fh "Page $page_num (type $doctype)\n";
@@ -466,10 +471,172 @@ sub print_tsv_report {
 	}
 }
 
+sub print_tsv_format2_report {
+	my ($self, $fh) = @_;
+	my $title 		= $self->{_group_data}{name};
+	my $diary_id	= $self->get_zooniverse_id();
+	my $tags_by_date;
+	foreach my $page (@{$self->{_pages}}) {
+		my $page_num		= $page->get_page_num();
+		my $doctype			= $page->get_doctype(); 
+		my $zooniverse_id	= $page->get_zooniverse_id();
+		if (defined (my $hashtags = $page->get_hashtags())) {
+			my @hashtags = keys %$hashtags;
+		}
+		foreach my $type (keys %{$page->{_clusters}}) {
+			next if $type eq 'diaryDate' or $type eq 'doctype'; # we've used these to create our date_lookup function already
+			foreach my $cluster (@{$page->{_clusters}{$type}}) {
+				next if ($cluster->get_type() ne 'activity' && $cluster->get_type() ne 'domestic'); 
+				my $date = get_date_for($page_num, $cluster->{median_centroid}[1]);
+				my $place = get_place_for($page_num, $cluster->{median_centroid}[1]);
+				$tags_by_date->{$date->{sortable}}{places}{$place}++;
+				$tags_by_date->{$date->{sortable}}{date} = $date->{friendly};
+				$tags_by_date->{$date->{sortable}}{pages}{$page_num} = {'doctype' => $doctype, 'zooniverse_id' => $zooniverse_id, };
+				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
+					my $tag = $consensus_annotation->get_type().":".$consensus_annotation->get_note();
+					$tags_by_date->{$date->{sortable}}{tags}{$tag}++;
+				}
+				else {
+					undef;
+				}
+				
+				undef;
+			}
+		}
+		undef;
+	}
+	open my $ofh, ">", "output/$diary_id.tsv";
+	my @activities = (
+						"activity:attack",
+						"activity:enemy_activity",
+						"activity:fire",
+						"activity:line",
+						"activity:movement",
+						"activity:other",
+						"activity:quiet",
+						"activity:reconnoitered",
+						"activity:repair",
+						"activity:resting",
+						"activity:resupplying",
+						"activity:strength",
+						"activity:training",
+						"activity:withdraw",
+						"activity:working",
+						);
+	print $ofh "#Unit\tDate\tPageNum\tPageID\tPlace1\tPlace2\tPlace3\t";
+	print $ofh join("\t",@activities);
+	print $ofh "\n";
+	foreach my $date (sort keys %$tags_by_date) {
+		my @pages = sort {$a <=> $b} keys %{$tags_by_date->{$date}{pages}};
+		my @page_ids = ();
+		foreach my $page_num (@pages) {
+			push @page_ids, $tags_by_date->{$date}{pages}{$page_num}{zooniverse_id};
+		}
+		my $friendly_date = $tags_by_date->{$date}{date};
+		print $ofh "$title\t$friendly_date\t@pages\t@page_ids\t";
+		my @places = keys %{$tags_by_date->{$date}{places}};
+		if (@places > 3) {
+			undef;
+		}
+		for (my $i=0; $i<3; $i++) {
+			if (defined $places[$i]) {
+				print $ofh "$places[$i]\t";
+			}
+			else {
+				print $ofh "\t";
+			}
+		}
+		foreach my $tag_type (@activities) {
+			if (defined($tags_by_date->{$date}{tags}{$tag_type})) {
+				print $ofh "$tags_by_date->{$date}{tags}{$tag_type}\t";
+			}
+			else {
+				print $ofh "\t";
+			}
+		}
+		print $ofh "\n";
+	}
+	undef;
+#	my $tags_by_date;
+#	my $current_date;
+#	foreach my $page (sort {$a <=> $b} keys %$chrono_clusters) {
+#		foreach my $y_coord (sort {$a <=> $b} keys %{$chrono_clusters->{$page}}) {
+#			my $date = get_date_for($page, $y_coord);
+#			my $place = get_place_for($page, $y_coord);
+#			if (!defined($current_date) || $date->{friendly} ne $current_date) {
+#				$current_date = $date->{friendly};
+#			}
+#			if ($y_coord == 0) {
+#				push @{$tags_by_date->{$date->{sortable}}{page}}, $page;
+#				push @{$tags_by_date->{$date->{sortable}}{zooniverse_id}}, $chrono_clusters->{$page}{0}{meta}{zooniverse_id};
+#			}
+#			
+#			foreach my $cluster (@{$chrono_clusters->{$page}{$y_coord}{clusters}}) {
+#				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
+#					if ((my $type = $consensus_annotation->get_type()) ne 'diaryDate') {
+#						push @{$tags_by_date->{$date->{sortable}}
+#						#print $fh "$title\t$page\t$zooniverse_id\t$doctype\t$current_date\t$place\t$type\t",$consensus_annotation->get_string_value(),"\n";
+#					}
+#				}
+#			}
+#		}
+#	}
+}
+
 sub resolve_uncertainty {
 	my ($self) = @_;
 	foreach my $page (@{$self->{_pages}}) {
 		$page->resolve_uncertainty();
+	}
+}
+
+sub fix_suspect_diaryDates {
+	my ($self) = @_;
+	# Look for likely errors like incorrect guesses at years where the original diary page did not mention the year
+	# eg. keep a running tally of the most recently used date and if the dates on the next page jump backwards or forwards
+	# approximately n*365 days, assume that the year needs to be corrected
+	my $latest_date_from_previous_page;
+	foreach my $page (@{$self->{_pages}}) {
+		#my ($earliest_date_for_page,$latest_date_for_page,$median_date_for_page);
+		my $latest_date_for_page;
+		if (defined $page->{_clusters}{diaryDate}) {
+			foreach my $cluster (@{$page->{_clusters}{diaryDate}}) {
+				my $consensus_annotation = $cluster->get_consensus_annotation();
+				if (defined $consensus_annotation) {
+					my $sortable_date = get_sortable_date($consensus_annotation->get_note());
+					if (!defined $latest_date_for_page || $sortable_date > $latest_date_for_page) {
+						$latest_date_for_page = $sortable_date;
+					}
+					else {
+						# step back in time?
+						undef;
+					}
+				}
+				else {
+					# no consensus on date?
+					undef;
+					
+				}
+			}
+		}
+		else {
+			$latest_date_for_page = $latest_date_from_previous_page;
+		}
+		if (!defined $latest_date_from_previous_page || $latest_date_for_page >= $latest_date_from_previous_page) {
+			$latest_date_from_previous_page = $latest_date_for_page;
+		}
+		else {
+			if (!defined $latest_date_for_page) {
+				undef;
+			}
+			else {
+				# if latest_date_for_page is approximately n*365 dsys earlier or later than
+				# the previous page, work out how to fix it.
+				
+				undef;
+			}
+		}
+		undef;
 	}
 }
 

@@ -3,7 +3,10 @@ use strict;
 use Data::Dumper;
 use OWD::Annotation;
 
+my $debug = 3;
+
 sub new {
+	print "OWD::Classification::new() called\n" if $debug > 2;
 	my ($class, $_page, $_classification) = @_;
 	my @_annotations;
 	my $classification_obj = bless {}, $class;

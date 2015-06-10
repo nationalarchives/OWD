@@ -56,7 +56,8 @@ sub _data_consistent {
 			|| $self->{_annotation_data}{type} eq 'date'
 			|| $self->{_annotation_data}{type} eq 'mapRef'
 			|| $self->{_annotation_data}{type} eq 'gridRef'
-			|| $self->{_annotation_data}{type} eq 'time') {
+			|| $self->{_annotation_data}{type} eq 'time'
+			|| $self->{_annotation_data}{type} eq 'strength') {
 		if (defined($self->{_annotation_data}{standardised_note})) {
 			return 1;
 		} 
@@ -145,7 +146,7 @@ sub resolve_disputes {
 					my @values = sort @{$self->{_annotation_data}{standardised_note}{$standardised_note_field}};
 					if (@values > 2) {
 						# how do we choose from more than two values
-						undef;
+						undef; # BREAKPOINT: improve dispute handling
 					}
 					else {
 						# if one value is blank or 'other' and the other isn't, use the other
@@ -176,20 +177,24 @@ sub resolve_disputes {
 						}
 						else {
 							# how do we choose from this combo of values?
+							# BREAKPOINT: improve dispute handling
 							$self->{_annotation_data}{standardised_note}{$standardised_note_field} = '';
 						}
 					}
 				}
 				else {
+					# BREAKPOINT: improve dispute handling
 					$self->{_annotation_data}{standardised_note}{$standardised_note_field} = '';
 				}
 			}
 			if (ref($self->{_annotation_data}{standardised_note}{$standardised_note_field}) eq 'ARRAY') {
+				# BREAKPOINT: improve dispute handling
 				$self->{_annotation_data}{standardised_note}{$standardised_note_field} = '';
 			}
 		}
 	}
 	elsif (ref($self->{_annotation_data}{standardised_note}) eq 'ARRAY') {
+		# BREAKPOINT: improve dispute handling
 		undef;
 	}
 }

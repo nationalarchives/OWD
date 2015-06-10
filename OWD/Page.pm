@@ -7,7 +7,7 @@ use Data::Dumper;
 use Text::LevenshteinXS;
 use Carp;
 
-my $debug = 1;
+my $debug = 3;
 
 sub new {
 	my ($class, $_diary, $_subject) = @_;
@@ -20,16 +20,19 @@ sub new {
 }
 
 sub load_classifications {
+	print "OWD::Page::load_classifications() called\n" if $debug > 2;
 	my ($self) = @_;
 	my $page = $self->get_page_num();
 #	print "page $page\n"; # DEBUG DELETE
 	my $_classifications = [];
+	print "performing mongo query to fetch classifications for this page\ndb.war_diary_classifications.find({'subjects.zooniverse_id': ".$self->{_page_data}->{zooniverse_id}."})" if $debug > 2;
 	my $cur_classifications = 
 		$self->{_diary}->{_processor}->{coll_classifications}->find(
 			{'subjects.zooniverse_id' => $self->{_page_data}->{zooniverse_id} }
 		);
 	$cur_classifications->fields({'annotations'=>1,'subjects'=>1,'updated_at'=>1,'user_ip'=>1,'user_name'=>1});
 	if ($cur_classifications->has_next) {
+		print "Iterating through classifications cursor\n" if $debug > 2;
 		while (my $classification = $cur_classifications->next) {
 			push @$_classifications, OWD::Classification->new($self,$classification);
 		}
@@ -290,7 +293,6 @@ sub _match_annotation_against_existing {
 	my $annotation_distance_from_cluster;
 	my $annotation_similarity_to_cluster;
 	for (my $cluster_num = 0; $cluster_num <  @{$self->{_clusters}{$type}}; $cluster_num++) {
-		# TODO first check that the contributor of new_annotation doesn't already have an annotation in this cluster. Next cluster if so. 
 		# check for distance (x/y)
 		my $distance = acceptable_distance($type,$new_annotation->get_coordinates(),$self->{_clusters}{$type}[$cluster_num]->get_centroid());
 		if (defined($distance)) {

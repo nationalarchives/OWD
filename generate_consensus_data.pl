@@ -6,7 +6,7 @@ use MongoDB;
 use Data::Dumper;
 
 # db connection strings
-my $debug = 1;
+my $debug = 3;
 my $war_diary_server	= "localhost:27017";
 my $war_diary_db_name	= "war_diary_2014-11-24";	# the raw source data
 my $war_diary_output_db	= "war_diary_export";		# the exported consensus data
@@ -31,11 +31,16 @@ $owd->set_confirmed_db($confirmed_db);
 
 my $total_raw_tag_counts;
 my $diary_count = 0;
-my $diary_id = "GWD0000006";
+
+my $diary_id;
+if ($ARGV[0] =~ /^GWD/) {
+	$diary_id = $ARGV[0];
+}
+
 # OWD::Processor::get_diary() fetches the requested diary (or iterates through all the diaries in the DB if
 # called with an empty parameter list). It loads the diary data, then loads page data too
-while (my $diary = $owd->get_diary())
 #my $diary = $owd->get_diary($diary_id);
+while (my $diary = $owd->get_diary())
 {
 	$diary_count++;
 	my $diary_id = $diary->get_zooniverse_id();
@@ -60,12 +65,17 @@ while (my $diary = $owd->get_diary())
 		print "Creating place lookup\n";
 		$diary->create_place_lookup();
 		$diary->resolve_uncertainty();
+		$diary->fix_suspect_diaryDates();
 		open my $text_report, ">", "output/$diary_id-text.txt";
 		$diary->print_text_report($text_report);
 		close $text_report;
-		open my $tsv_report, ">", "output/$diary_id.tsv";
-		$diary->print_tsv_report($tsv_report);
+#		open my $tsv_report, ">", "output/$diary_id.tsv";
+#		$diary->print_tsv_report($tsv_report);
+#		close $tsv_report;
+		open my $tsv_report, ">", "output/$diary_id-format2.tsv";
+		$diary->print_tsv_format2_report($tsv_report);
 		close $tsv_report;
+
 		$diary->publish_to_db();
 		my $tag_types = {};
 		my $diary_raw_tag_type_counts = $diary->get_raw_tag_type_counts();

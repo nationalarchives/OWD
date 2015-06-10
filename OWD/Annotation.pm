@@ -100,6 +100,40 @@ sub new {
 	if ($_classification->{_page}{_page_data}{metadata}{page_number} == 13 && $_annotation->{type} eq 'person') {
 		undef; # DEBUG DELETE
 	}
+# TODO: Remove this section once debugged
+	my @activities = (
+						"activity:attack",
+						"activity:enemy_activity",
+						"activity:fire",
+						"activity:line",
+						"activity:movement",
+						"activity:other",
+						"activity:quiet",
+						"activity:reconnoitered",
+						"activity:repair",
+						"activity:resting",
+						"activity:resupplying",
+						"activity:strength",
+						"activity:training",
+						"activity:withdraw",
+						"activity:working",
+						);
+
+	if ($_annotation->{type} eq 'activity') {
+		my $type_note = $_annotation->{type}.":".$_annotation->{note};
+		my $seen = 0;
+		for ( @activities ) {
+			if ( $type_note eq $_ ) {
+				$seen = 1;
+				last;
+			}
+		}
+		if (!$seen) {
+			undef; # DEBUG DELETE
+		}
+	}
+
+#####
 	my $obj = bless {
 		'_classification'		=> $_classification,
 		'_annotation_data'		=> $_annotation,
@@ -264,6 +298,11 @@ sub get_string_value {
 	return $string_value;
 }
 
+sub get_note {
+	my ($self) = @_;
+	return $self->{_annotation_data}{standardised_note};
+}
+
 sub is_identical_to {
 	my ($self,$other_annotation) = @_;
 	# return true if the contents of the two annotations are identical after checking:
@@ -395,6 +434,7 @@ sub _standardise_punctuation {
 			if ($standardised_note->{$note_key} ne $original_value) {
 				$note_has_been_modified = 1;
 				#print "$original_value -> $standardised_note->{$note_key}\n" if $type_and_key ne 'person:first';
+				#print "$type_and_key: $original_value\n" if ($type_and_key ne 'place:placeOption' && $type_and_key !~ /ui-id-\d+/ && $type_and_key ne 'place:country');
 			}
 		}
 	}
@@ -570,6 +610,11 @@ sub _data_consistent {
 				};
 				$self->data_error($error);
 				return 0;
+			}
+		}
+		else {
+			if (!defined $annotation->{note} || $annotation->{note} eq '') {
+				undef;
 			}
 		}
 	}

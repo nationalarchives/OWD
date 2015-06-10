@@ -38,21 +38,27 @@ my $core_consensus_fields = {
 	},
 };
 
+my $diaryDate_y_axis_skew = -2;
+
 sub new {
 	my ($class, $page, $annotation) = @_;
 	my $obj = bless {}, $class;
 	$obj->{_page} = $page;
 	# ^ remember to delete this circular reference
 	push @{$obj->{_annotations}}, $annotation;
-	$obj->{centroid} = $annotation->{_annotation_data}{coords};
-	$obj->{median_centroid} = $annotation->{_annotation_data}{coords};
+#	$obj->{centroid} = $annotation->{_annotation_data}{coords};
+#	$obj->{median_centroid} = $annotation->{_annotation_data}{coords};
+	my $coords = $obj->get_coords();
+	$obj->{centroid} = calculate_centroid($coords);
+	$obj->{median_centroid} = calculate_median_centroid($coords);
 	$obj->{type} = $annotation->{_annotation_data}{type};
 	# annotations often end up one or two y-axis units above the date that refers to them
 	# artificially nudge diaryDate types up the page by two y-axis units to try to reduce 
 	# the incidence of this happening. (moving up the y axis in this case means subtracting
 	# from the y axis value because the origin is the top left corner of the page
 	if ($obj->{type} eq 'diaryDate') {
-		$obj->{median_centroid}[1] -= 2;
+		$obj->{median_centroid}[1] += $diaryDate_y_axis_skew;
+		$obj->{centroid}[1] += $diaryDate_y_axis_skew;
 	}
 	$obj->{range} = 0;
 	return $obj;
@@ -65,7 +71,8 @@ sub add_annotation {
 	$self->{centroid} = calculate_centroid($coords);
 	$self->{median_centroid} = calculate_median_centroid($coords);
 	if ($self->{type} eq 'diaryDate') {
-		$self->{median_centroid}[1] -= 2;
+		$self->{median_centroid}[1] += $diaryDate_y_axis_skew;
+		$self->{centroid}[1] += $diaryDate_y_axis_skew;
 	}
 	$self->{range} = $self->get_range($coords);
 }
@@ -131,6 +138,11 @@ sub get_range {
 	return $max;
 }
 
+sub get_type {
+	my ($self, $coords) = @_;
+	return $self->{type};
+}
+
 sub get_first_annotation {
 	my ($self) = @_;
 	return $self->{_annotations}[0];
@@ -143,6 +155,9 @@ sub distance {
 
 sub establish_consensus {
 	my ($self) = @_;
+	if ($self->{_page}->get_page_num() == 15 && $self->{_annotations}[0]{_annotation_data}{type} eq 'diaryDate') { # DEBUG
+		undef;
+	}
 	my %value_counts;
 	my $note_type = 'SCALAR';
 	# Start building a consensus annotation structure to be blessed as a ConsensusAnnotation later
