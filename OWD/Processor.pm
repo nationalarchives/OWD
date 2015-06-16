@@ -30,7 +30,7 @@ sub set_database {
 		return 1;
 	}
 	else {
-		return undef;
+		return;
 	}
 }
 
@@ -41,7 +41,7 @@ sub set_output_db {
 		return 1;
 	}
 	else {
-		return undef;
+		return;
 	}
 }
 
@@ -57,7 +57,7 @@ sub set_logging_db {
 		return 1;
 	}
 	else {
-		return undef;
+		return;
 	}
 }
 
@@ -73,7 +73,7 @@ sub set_tags_db {
 		return 1;
 	}
 	else {
-		return undef;
+		return;
 	}
 }
 
@@ -84,7 +84,7 @@ sub set_confirmed_db {
 		return 1;
 	}
 	else {
-		return undef;
+		return;
 	}
 }
 
@@ -131,7 +131,7 @@ sub get_diary {
 			return OWD::Diary->new($self,$group);
 		}
 		else {
-			return undef;
+			return;
 		}
 	}
 	elsif ($id =~ m|^GWD|) {

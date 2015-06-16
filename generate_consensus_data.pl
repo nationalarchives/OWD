@@ -14,7 +14,7 @@ my $war_diary_logging_db = "war_diary_logging";		# the logging db, recording any
 my $war_diary_tags		= "ouroboros_production";	# the raw Talk pages (for hash tags and page talk)
 my $war_diary_confirmed	= "war_diary_confirmed";
 
-my $client 		= MongoDB::MongoClient->new(host => $war_diary_server);
+my $client 		= MongoDB::MongoClient->new(host => $war_diary_server,query_timeout => 50000);
 my $db 			= $client->get_database($war_diary_db_name);
 my $output_db	= $client->get_database($war_diary_output_db);
 my $logging_db 	= $client->get_database($war_diary_logging_db);
@@ -36,11 +36,14 @@ my $diary_id;
 if ($ARGV[0] =~ /^GWD/) {
 	$diary_id = $ARGV[0];
 }
+else {
+	$diary_id = '';
+}
 
 # OWD::Processor::get_diary() fetches the requested diary (or iterates through all the diaries in the DB if
 # called with an empty parameter list). It loads the diary data, then loads page data too
-#my $diary = $owd->get_diary($diary_id);
-while (my $diary = $owd->get_diary())
+my $diary = $owd->get_diary($diary_id);
+#while (my $diary = $owd->get_diary())
 {
 	$diary_count++;
 	my $diary_id = $diary->get_zooniverse_id();
@@ -49,10 +52,11 @@ while (my $diary = $owd->get_diary())
 	$owd->get_logging_db()->get_collection('error')->remove({"diary.group_id" => "$diary_id"});
 	$owd->get_logging_db()->get_collection('log')->remove({"diary.group_id" => "$diary_id"});
 	print "$diary_count: ",$diary->get_docref()," (".$diary->get_zooniverse_id().")\n";
-	print "Loading classifications\n";
-	# OWD::Diary::load_classifications() iterates through each page of the current diary loading classifications
-	my $num_pages_with_classifications = $diary->load_classifications();
 	if ($diary->get_status() eq "complete") {
+		$diary->load_pages();
+		print "Loading classifications\n";
+		# OWD::Diary::load_classifications() iterates through each page of the current diary loading classifications
+		my $num_pages_with_classifications = $diary->load_classifications();
 		$diary->strip_multiple_classifications_by_single_user();
 		$diary->report_pages_with_insufficient_classifications();
 		$diary->load_hashtags();
@@ -65,10 +69,10 @@ while (my $diary = $owd->get_diary())
 		print "Creating place lookup\n";
 		$diary->create_place_lookup();
 		$diary->resolve_uncertainty();
-		$diary->fix_suspect_diaryDates();
-		open my $text_report, ">", "output/$diary_id-text.txt";
-		$diary->print_text_report($text_report);
-		close $text_report;
+		#$diary->fix_suspect_diaryDates();
+#		open my $text_report, ">", "output/$diary_id-text.txt";
+#		$diary->print_text_report($text_report);
+#		close $text_report;
 #		open my $tsv_report, ">", "output/$diary_id.tsv";
 #		$diary->print_tsv_report($tsv_report);
 #		close $tsv_report;

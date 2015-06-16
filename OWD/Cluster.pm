@@ -155,9 +155,6 @@ sub distance {
 
 sub establish_consensus {
 	my ($self) = @_;
-	if ($self->{_page}->get_page_num() == 15 && $self->{_annotations}[0]{_annotation_data}{type} eq 'diaryDate') { # DEBUG
-		undef;
-	}
 	my %value_counts;
 	my $note_type = 'SCALAR';
 	# Start building a consensus annotation structure to be blessed as a ConsensusAnnotation later
@@ -325,7 +322,12 @@ sub establish_consensus {
 		}
 		else {
 			# There are no consensus constraints on this annotation type. Use a default of PLURALITY_CONSENSUS
-			undef;
+			$enough_consensus = 1;
+			foreach my $value (values %$status_of_field) {
+				if ($value < 3) {
+					$enough_consensus = 0;
+				}
+			}
 		}
 	}
 	if ($enough_consensus) {
@@ -352,6 +354,26 @@ sub establish_consensus {
 	}
 }
 
+sub _get_annotation_value_scores {
+	my ($annotations) = @_;
+	my %value_counts;
+	my $note_type = 'SCALAR';
+
+	# tally the number of instances of each value to get a "degree of consensus" score
+	foreach my $annotation (@annotations) {
+		if (ref($annotation->{_annotation_data}{standardised_note}) eq 'HASH') {
+			$note_type = 'HASH';
+			foreach my $key (keys %{$annotation->{_annotation_data}{standardised_note}}) {
+				$value_counts{$key}{$annotation->{_annotation_data}{standardised_note}{$key}}++;
+			}
+		}
+		else {
+			$value_counts{$annotation->{_annotation_data}{standardised_note}}++;
+		}
+	}
+	return \%value_counts;
+}
+
 sub get_consensus_annotation {
 	my ($self) = @_;
 	if (defined($self->{consensus_annotation})) {
@@ -360,6 +382,11 @@ sub get_consensus_annotation {
 	else {
 		return undef;
 	}
+}
+
+sub count_annotations {
+	my ($self) = @_;
+	return scalar @{$self->{_annotations}};
 }
 
 sub data_error {

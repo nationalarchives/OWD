@@ -2,6 +2,8 @@ package OWD::Annotation;
 use strict;
 use List::MoreUtils;
 
+my $debug = 1;
+
 my $valid_doctypes = {
 	'cover'		=> 1,
 	'blank'		=> 1,
@@ -91,6 +93,10 @@ my $free_text_fields = {
 
 sub new {
 	my ($class, $_classification, $_annotation) = @_;
+	print "OWD::Annotation->new() called on $_annotation->{id}\n" if $debug > 2;
+#	if ($_annotation->{id} eq "AWD0000gk7_migginspies_53_69") {
+#		undef; # DEBUG DELETE
+#	}
 	# some "cleaning" needs to be done to the raw data to improve chances of consensus
 	# - extraneous spacing and punctuation were sometimes added by users in free text fields
 	# - bugs in the application allowed things like inconsistent date formats, invalid dates, 
@@ -100,40 +106,6 @@ sub new {
 	if ($_classification->{_page}{_page_data}{metadata}{page_number} == 13 && $_annotation->{type} eq 'person') {
 		undef; # DEBUG DELETE
 	}
-# TODO: Remove this section once debugged
-	my @activities = (
-						"activity:attack",
-						"activity:enemy_activity",
-						"activity:fire",
-						"activity:line",
-						"activity:movement",
-						"activity:other",
-						"activity:quiet",
-						"activity:reconnoitered",
-						"activity:repair",
-						"activity:resting",
-						"activity:resupplying",
-						"activity:strength",
-						"activity:training",
-						"activity:withdraw",
-						"activity:working",
-						);
-
-	if ($_annotation->{type} eq 'activity') {
-		my $type_note = $_annotation->{type}.":".$_annotation->{note};
-		my $seen = 0;
-		for ( @activities ) {
-			if ( $type_note eq $_ ) {
-				$seen = 1;
-				last;
-			}
-		}
-		if (!$seen) {
-			undef; # DEBUG DELETE
-		}
-	}
-
-#####
 	my $obj = bless {
 		'_classification'		=> $_classification,
 		'_annotation_data'		=> $_annotation,
@@ -337,6 +309,7 @@ sub _standardise_punctuation {
 	# strip out multiple consecutive spaces
 	# strip out leading spaces and trailing spaces
 	my ($self) = @_;
+	print "OWD::Annotation->_standardise_punctuation() called\n" if $debug > 2;
 	my $standardised_note;
 	my $note_has_been_modified = 0;
 	if (ref($self->{_annotation_data}{standardised_note}) eq "HASH") {
@@ -366,7 +339,7 @@ sub _standardise_punctuation {
 				if ($standardised_field =~ m/\bMt\.? ?/) {
 					$standardised_field =~ s/\bMt.? /Mont /g;;
 				}
-				if ($type_and_key eq 'person:unit') {
+				if ($type_and_key eq 'person:unit' && $standardised_field ne '') {
 					my $field_is_unabbreviated = 0;
 					do {
 						my $unabbreviated_standardised_field = _unabbreviate_unit_name($standardised_field);
@@ -542,11 +515,14 @@ sub _fix_known_errors {
 
 sub _data_consistent {
 	my ($self) = @_;
+	print "OWD::Annotation->_data_consistent() called\n" if $debug > 2;
 	# first check if a 'confirmed' db exists, which can store the results of QA work and list annotations that can be dropped/deleted
 	# after failing QA. If the DB doesn't exist, all annotations are treated equally.
 	if (ref($self->{_classification}->get_page()->get_diary()->get_processor()->get_confirmed_db()) eq 'MongoDB::Database') {
+		print "Querying confirmed_db for overruling annotation\n" if $debug > 2;
 		my $coll_delete = $self->{_classification}->get_page()->get_diary()->get_processor()->get_delete_collection();
 		my $obj_to_delete = $coll_delete->find_one({'annotation_id' => $self->{_annotation_data}{id}});
+		print "Query Complete\n" if $debug > 2;
 		if (ref($obj_to_delete) eq 'HASH') {
 			return 0;
 		}
@@ -637,13 +613,19 @@ sub _tidy_user_entry {
 		my $original_string = $string;
 		if ($field_name eq "person:first") {
 			$string =~ s/\. ?/ /g;	# remove full stops from dotted initials
+			$string =~ s/, ?/ /g;	# remove commas
+			if ($string =~ /'/ && $string !~ /d'arcy/i) {
+				print "Apostrophe found in first name: '$string'\nPress Enter to continue\n";
+				#<STDIN>; # DEBUG DELETE
+				#$string =~ s/'/ /g;	# remove apostrophes
+			}
 			$string =~ s/^\s+//;	# remove leading spaces
 			if ($string =~ /\bLORD\b/) {
 				$string =~ s/LORD/Lord/; # a later substitution converts 2-4 upper case charaters into space delimited initials
 			}
 			if ($string =~ /^[A-Z]{2,4}$/) {
 				$string =~ s/([A-Z])/$1 /g; # convert "ABC" format initials to "A B C " format
-				$string = _tidy_user_entry($string, $field_name);
+				$string = _tidy_user_entry($string, $field_name) if ($string ne $original_string);
 			}
 			if ($string =~ /(?:\b[a-z]\b ?)+$/) {
 				my @substring = split / /,$string;
@@ -658,19 +640,19 @@ sub _tidy_user_entry {
 				}
 				$string = $replacement_string;
 #				$string = uc $string; # uppercase all initials
-				$string = _tidy_user_entry($string, $field_name);
+				$string = _tidy_user_entry($string, $field_name) if ($string ne $original_string);
 			}
 			if ($string =~ /^(?:\b[a-z]\b ?)+$/) {
 				$string = uc $string; # uppercase all initials
-				$string = _tidy_user_entry($string, $field_name);
+				$string = _tidy_user_entry($string, $field_name) if ($string ne $original_string);
 			}
 			if ($string =~ /\bSir /) {
 				$string =~ s/\bSir //; # remove titles. Consider creating a separate field for stripped titles
-				$string = _tidy_user_entry($string, $field_name);
+				$string = _tidy_user_entry($string, $field_name) if ($string ne $original_string);
 			}
 			if ($string =~ /(The )?\bHon\.? /) {
 				$string =~ s/(The )?\bHon\.? //; # remove titles. Consider creating a separate field for stripped titles
-				$string = _tidy_user_entry($string, $field_name);
+				$string = _tidy_user_entry($string, $field_name) if ($string ne $original_string);
 			}
 			$string =~ s/\s+$//;
 			return $string;
@@ -727,6 +709,7 @@ sub _tidy_user_entry {
 
 sub _unabbreviate_unit_name {
 	my ($unit_name) = @_;
+	print "OWD::Annotation->_unabbreviate_unit_name called\n" if $debug > 2;
 	my $original_unit_name = $unit_name;
 	if ($unit_name =~ m|\bA\.D\.V\.S\.?\b|i) {
 		$unit_name =~ s|\bA\.D\.V\.S\.?\b|Assistant Director Veterinary Service|i;
@@ -828,6 +811,7 @@ sub _unabbreviate_unit_name {
 	if ($unit_name ne $original_unit_name) {
 		#print "Unit name: '$original_unit_name' changed to '$unit_name'\n";
 	}
+	print "_unabbreviate_unit_name complete\n" if $debug > 2;
 	return $unit_name;
 }
 

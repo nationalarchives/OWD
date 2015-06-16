@@ -6,8 +6,9 @@ use Algorithm::ClusterPoints;
 use Data::Dumper;
 use Text::LevenshteinXS;
 use Carp;
+use DateTime::Format::Natural;
 
-my $debug = 3;
+my $debug = 1;
 
 sub new {
 	my ($class, $_diary, $_subject) = @_;
@@ -37,6 +38,7 @@ sub load_classifications {
 			push @$_classifications, OWD::Classification->new($self,$classification);
 		}
 		$self->{_classifications} = $_classifications;
+		undef $cur_classifications;
 		return 1;
 	}
 	else {
@@ -60,6 +62,7 @@ sub load_hashtags {
 			}
 		}
 		$self->{_hashtags} = $_hashtags;
+		undef $cur_hashtags;
 		return 1;
 	}
 	else {
@@ -587,6 +590,53 @@ sub resolve_uncertainty {
 			}
 		}
 	}
+}
+
+sub get_date_range {
+	my ($self) = @_;
+	my $date_range;
+	# TODO: calculate earliest, latest and median date, return array/hash of results.
+	if (defined($self->{_clusters}{diaryDate})) {
+		my $date_parser = DateTime::Format::Natural->new();
+		foreach my $cluster (@{$self->{_clusters}{diaryDate}}) {
+			my $consensus_annotation = $cluster->get_consensus_annotation();
+			if (defined($consensus_annotation)) {
+				my $date_string = $consensus_annotation->get_string_value();
+				print "$date_string\n";
+				my $date = $date_parser->parse_datetime($date_string);
+				if (!defined($date_range->{min})) {
+					$date_range->{min} = $date;
+				}
+				elsif (DateTime::compare($date_range->{min},$date) > 0) {
+					$date_range->{min} = $date;
+				}
+				if (!defined($date_range->{max})) {
+					$date_range->{max} = $date;
+				}
+				elsif (DateTime::compare($date_range->{max},$date) < 0) {
+					$date_range->{max} = $date;
+				}
+			}
+			else {
+				# should we record the clusters that don't have consensus somewhere for easy access later?
+				undef;
+			}
+		}
+		undef;
+	}
+	return $date_range;
+}
+
+sub resolve_diaryDate_disputes {
+	my ($self) = @_;
+	if (defined $self->{_clusters}{diaryDate}) {
+		foreach my $cluster (@{$self->{_clusters}{diaryDate}}) {
+			if (!defined($cluster->{consensus_annotation}) && $cluster->count_annotations() > 1) {
+				undef;
+			}
+		}
+	}
+	undef;
 }
 
 sub data_error {

@@ -28,23 +28,52 @@ sub new {
 	my $_diary = bless {},$class;
 	$_diary->{_group_data}	= $_group;
 	$_diary->{_processor}	= $_processor;
+#	my $subjects_ref = [];	# an array of subjects (pages) within the diary, sorted by page number
+#	my $cur_subjects = $_processor->{coll_subjects}->find({"group.zooniverse_id" => $_group->{zooniverse_id}});
+#	$cur_subjects->fields({'classification_count'=>1,'group'=>1,'location'=>1,'metadata'=>1,'state'=>1,'zooniverse_id'=>1});
+#	$cur_subjects->sort({"metadata.page_number" => 1});
+#	if ($cur_subjects->has_next) {
+#		while (my $subject = $cur_subjects->next) {
+#			push @$subjects_ref, OWD::Page->new($_diary,$subject);
+#		}
+#	}
+#	$_diary->{_pages}		= $subjects_ref;
+	return $_diary;
+}
+
+sub load_pages {
+	my ($self) = @_;
+	print "Loading page data for current diary\n" if $debug;
 	my $subjects_ref = [];	# an array of subjects (pages) within the diary, sorted by page number
-	my $cur_subjects = $_processor->{coll_subjects}->find({"group.zooniverse_id" => $_group->{zooniverse_id}});
+	my @stage;
+	push @stage,{'stage' => 'find() method call','time' => time()};
+	my $cur_subjects = $self->{_processor}->{coll_subjects}->find({"group.zooniverse_id" => $self->get_zooniverse_id()});
+	push @stage,{'stage' => 'field_selection','time' => time()};
 	$cur_subjects->fields({'classification_count'=>1,'group'=>1,'location'=>1,'metadata'=>1,'state'=>1,'zooniverse_id'=>1});
+	push @stage,{'stage' => 'sort','time' => time()};
 	$cur_subjects->sort({"metadata.page_number" => 1});
+	push @stage,{'stage' => 'has_next','time' => time()};
 	if ($cur_subjects->has_next) {
+		push @stage,{'stage' => '','time' => time()};
 		while (my $subject = $cur_subjects->next) {
-			push @$subjects_ref, OWD::Page->new($_diary,$subject);
+			push @$subjects_ref, OWD::Page->new($self,$subject);
 		}
 	}
-	$_diary->{_pages}		= $subjects_ref;
-	return $_diary;
+	undef $cur_subjects;
+	for (my $stage_num=0; $stage_num<@stage-1;$stage_num++) {
+		print $stage[$stage_num]{stage}, ": ", $stage[$stage_num+1]{time} - $stage[$stage_num]{time}, "s\n";
+	}
+	$self->{_pages}		= $subjects_ref;
+	return 1;
 }
 
 sub load_classifications {
 	print "OWD::Diary::load_classifications() called\n" if $debug > 2;
 	my ($self) = @_;
 	my $diary_return_val = 0;
+	if (!defined $self->{_pages}) {
+		$self->load_pages();
+	}
 	foreach my $page (@{$self->{_pages}}) {
 		print "  page ", $page->get_page_num(), "\n";
 		my $return_val = $page->load_classifications();
@@ -57,6 +86,9 @@ sub load_classifications {
 
 sub load_hashtags {
 	my ($self) = @_;
+	if (!defined $self->{_pages}) {
+		$self->load_pages();
+	}
 	foreach my $page (@{$self->{_pages}}) {
 		$page->load_hashtags();
 	}
@@ -76,6 +108,9 @@ sub get_processor() {
 sub get_raw_tag_type_counts {
 	my ($self) = @_;
 	my $diary_tag_counts = {};
+	if (!defined $self->{_pages}) {
+		$self->load_pages();
+	}
 	foreach my $page (@{$self->{_pages}}) {
 		my $page_tag_counts = $page->get_raw_tag_type_counts();
 		while (my ($type,$count) = each %$page_tag_counts) {
@@ -102,6 +137,9 @@ sub get_zooniverse_id {
 
 sub strip_multiple_classifications_by_single_user {
 	my ($self) = @_;
+	if (!defined $self->{_pages}) {
+		$self->load_pages();
+	}
 	foreach my $page (@{$self->{_pages}}) {
 		$page->strip_multiple_classifications_by_single_user();
 	}
@@ -111,6 +149,9 @@ sub report_pages_with_insufficient_classifications {
 	my ($self, $min_classifications) = @_;
 	if (!$min_classifications) {
 		$min_classifications = 5;
+	}
+	if (!defined $self->{_pages}) {
+		$self->load_pages();
 	}
 	foreach my $page (@{$self->{_pages}}) {
 		if ($page->num_classifications() < $min_classifications) {
@@ -136,6 +177,9 @@ sub report_pages_with_insufficient_classifications {
 
 sub cluster_tags {
 	my ($self) = @_;
+	if (!defined $self->{_pages}) {
+		$self->load_pages();
+	}
 	foreach my $page (@{$self->{_pages}}) {
 		if ($page->num_classifications() > 0) {
 			$page->cluster_tags();
@@ -145,9 +189,26 @@ sub cluster_tags {
 
 sub establish_consensus {
 	my ($self) = @_;
+	$self->{date_range} = {};
+	if (!defined $self->{_pages}) {
+		$self->load_pages();
+	}
 	foreach my $page (@{$self->{_pages}}) {
 		$page->establish_consensus();
-	}	
+		# for pages that have no consensus on diaryDate clusters, it can be impossible to verify the date on the page in isolation
+		# but if we keep a running tally of the dates across the whole diary, the correct date can often be implied/inferred from the
+		# consensus dates on surrounding pages.
+		# After doing a first pass on establishing consensus, we can reprocess the disputed clusters with the consensus clusters elsewhere.
+		# In particular, look for no-consensus diaryDate fields and no-consensus person fields.
+		# TODO: get the range of consensus diaryDates per page, then use this to inform the decision on disputed dates.
+		# Create subs for OWD::Page->get_consensus_date_range()
+		$self->{date_range}{$page->get_page_num()} = $page->get_date_range();
+	}
+	$self->report_date_ranges_per_page();
+	foreach my $page (@{$self->{_pages}}) {
+		$page->resolve_diaryDate_disputes();
+	}
+	undef;	
 }
 
 sub data_error {
@@ -162,15 +223,45 @@ sub data_error {
 	$self->{_processor}->data_error($error_hash);
 }
 
+sub report_date_ranges_per_page {
+	my ($self) = @_;
+	my $date_parser = DateTime::Format::Natural->new();
+	my $base_date = $date_parser->parse_datetime("1 Jan 1914");
+	my $filename = $self->get_zooniverse_id()."-date_ranges.tsv";
+	open my $ofh, ">",  "output/$filename";
+	print $ofh "Page\tmin\tmax\n";
+	foreach my $page_num (sort {$a <=> $b} keys $self->{date_range}) {
+		next if (!defined $self->{date_range}{$page_num}{min});
+		print $ofh "$page_num\t";
+		foreach (@{$self->{date_range}{$page_num}}{'min','max'}) {
+			my $dur = $base_date->delta_days($_);
+			my $days = $dur->in_units('days');
+			print $ofh "$days\t";
+		}
+		print $ofh "\n";
+	}
+	close $ofh;
+}
+
 sub create_date_lookup {
 	my ($self) = @_;
+	# TODO: This sub runs after the establish_consensus() subroutine, but some diaryDate clusters may not have reached consensus
+	# (I've seen examples where there is disagreement about the year for a page where the author neglected to include the year in
+	# the dates.
 	my $start_date = $self->{_group_data}{metadata}{start_date};
 	my $current_date = $start_date->day()." ".$start_date->month_abbr()." ".$start_date->year();
 	my $current_sortable_date = get_sortable_date($current_date);
 
+	if (!defined $self->{_pages}) {
+		$self->load_pages();
+	}
 	#iterate through each page by ascending page number
 	foreach my $page (@{$self->{_pages}}) {
 		my $page_num = $page->get_page_num();
+		print "create_date_lookup, page $page_num\n" if $debug > 2;
+		if ($page_num == 182) {
+			undef; # DEBUG DELETE
+		}
 		$date_lookup->{$page_num} = {};
 		my $page_date_lookup = $date_lookup->{$page_num}; # the section of the $date_lookup hash referencing the current page
 		my $page_anomalies = {}; # a hash for any anomalies and their y coordinates 
@@ -291,6 +382,9 @@ sub create_place_lookup {
 	my ($self) = @_;
 	my $current_place = "";
 
+	if (!defined $self->{_pages}) {
+		$self->load_pages();
+	}
 	#iterate through each page by ascending page number
 	foreach my $page (@{$self->{_pages}}) {
 		my $page_num = $page->get_page_num();
@@ -507,24 +601,45 @@ sub print_tsv_format2_report {
 	}
 	open my $ofh, ">", "output/$diary_id.tsv";
 	my @activities = (
+						"activity:achieved",
 						"activity:attack",
+						"activity:casualty",
+						"activity:clearing",
+						"activity:construction",
 						"activity:enemy_activity",
 						"activity:fire",
 						"activity:line",
 						"activity:movement",
 						"activity:other",
 						"activity:quiet",
+						"activity:raid",
 						"activity:reconnoitered",
 						"activity:repair",
+						"activity:reserve",
 						"activity:resting",
 						"activity:resupplying",
 						"activity:strength",
+						"activity:support",
 						"activity:training",
 						"activity:withdraw",
 						"activity:working",
 						);
+	my @domestic = (
+						"domestic:accommodation",
+						"domestic:discipline",
+						"domestic:hygiene",
+						"domestic:inspections",
+						"domestic:medical",
+						"domestic:other",
+						"domestic:parades",
+						"domestic:rations",
+						"domestic:religion",
+						"domestic:sport",
+						"domestic:uniform",
+	);
 	print $ofh "#Unit\tDate\tPageNum\tPageID\tPlace1\tPlace2\tPlace3\t";
-	print $ofh join("\t",@activities);
+	print $ofh join("\t",@activities),"\t";
+	print $ofh join("\t",@domestic);
 	print $ofh "\n";
 	foreach my $date (sort keys %$tags_by_date) {
 		my @pages = sort {$a <=> $b} keys %{$tags_by_date->{$date}{pages}};
@@ -547,6 +662,14 @@ sub print_tsv_format2_report {
 			}
 		}
 		foreach my $tag_type (@activities) {
+			if (defined($tags_by_date->{$date}{tags}{$tag_type})) {
+				print $ofh "$tags_by_date->{$date}{tags}{$tag_type}\t";
+			}
+			else {
+				print $ofh "\t";
+			}
+		}
+		foreach my $tag_type (@domestic) {
 			if (defined($tags_by_date->{$date}{tags}{$tag_type})) {
 				print $ofh "$tags_by_date->{$date}{tags}{$tag_type}\t";
 			}

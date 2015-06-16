@@ -3,7 +3,7 @@ use strict;
 use Data::Dumper;
 use OWD::Annotation;
 
-my $debug = 3;
+my $debug = 1;
 
 sub new {
 	print "OWD::Classification::new() called\n" if $debug > 2;
@@ -39,6 +39,7 @@ sub new {
 			$_classification->{user_agent} = $annotation->{user_agent};
 		}
 		else {
+			print "Processing a page annotation\n" if $debug > 2;
 			my $coord_check_string = _coord_check_string($annotation->{coords});
 			my $obj_annotation = OWD::Annotation->new($classification_obj,$annotation);
 			# record the coordinates to enable duplicate checks.
@@ -81,6 +82,7 @@ sub new {
 			}
 		}
 		$classification_obj->{_num_annotations}++;
+		print "Annotation object created and added to classification\n" if $debug > 2;
 	}
 	delete $_classification->{annotations}; # separate the individual annotations from the classification object
 	$classification_obj->{_annotations} = \@_annotations;
