@@ -103,9 +103,6 @@ sub new {
 	# - different but valid ways of representing the same thing (like unit full names vs abbreviations)
 	# - users finding different ways of representing uncertainty
 
-	if ($_classification->{_page}{_page_data}{metadata}{page_number} == 13 && $_annotation->{type} eq 'person') {
-		undef; # DEBUG DELETE
-	}
 	my $obj = bless {
 		'_classification'		=> $_classification,
 		'_annotation_data'		=> $_annotation,
@@ -165,7 +162,7 @@ sub new {
 	}
 	else {
 		$obj->DESTROY();
-		return undef;
+		return;
 	}
 }
 
@@ -273,6 +270,12 @@ sub get_string_value {
 sub get_note {
 	my ($self) = @_;
 	return $self->{_annotation_data}{standardised_note};
+}
+
+sub set_note {
+	my ($self,$note) = @_;
+	$self->{_annotation_data}{standardised_note} = $note;
+	return $note;
 }
 
 sub is_identical_to {
@@ -514,23 +517,26 @@ sub _fix_known_errors {
 }
 
 sub _data_consistent {
+	# TODO: Rather than dropping an annotation with insufficient information (eg a diaryDate that's not in
+	# ^\d{1,2} [a-z]{3} \d{4}$/ format) maybe we could remove anything inconsistent and save the correct but
+	# incomplete information?
 	my ($self) = @_;
 	print "OWD::Annotation->_data_consistent() called\n" if $debug > 2;
 	# first check if a 'confirmed' db exists, which can store the results of QA work and list annotations that can be dropped/deleted
 	# after failing QA. If the DB doesn't exist, all annotations are treated equally.
-	if (ref($self->{_classification}->get_page()->get_diary()->get_processor()->get_confirmed_db()) eq 'MongoDB::Database') {
-		print "Querying confirmed_db for overruling annotation\n" if $debug > 2;
-		my $coll_delete = $self->{_classification}->get_page()->get_diary()->get_processor()->get_delete_collection();
-		my $obj_to_delete = $coll_delete->find_one({'annotation_id' => $self->{_annotation_data}{id}});
-		print "Query Complete\n" if $debug > 2;
-		if (ref($obj_to_delete) eq 'HASH') {
-			return 0;
-		}
-	}
+#	if (ref($self->{_classification}->get_page()->get_diary()->get_processor()->get_confirmed_db()) eq 'MongoDB::Database') {
+#		print "Querying confirmed_db for overruling annotation\n" if $debug > 2;
+#		my $coll_delete = $self->{_classification}->get_page()->get_diary()->get_processor()->get_delete_collection();
+#		my $obj_to_delete = $coll_delete->find_one({'annotation_id' => $self->{_annotation_data}{id}});
+#		print "Query Complete\n" if $debug > 2;
+#		if (ref($obj_to_delete) eq 'HASH') {
+#			return 0;
+#		}
+#	}
 	
 	my $annotation = $self->{_annotation_data};
 	if (defined $annotation->{type}) {
-		# unrecognised doctype
+		# This block validates the entries according to their data types
 		if ($annotation->{type} eq 'doctype' && !defined($valid_doctypes->{$annotation->{note}})) {
 			my $error = {
 				'type'		=> 'annotation_error; unexpected_value',
@@ -560,7 +566,7 @@ sub _data_consistent {
 				$self->data_error($error);
 				return 0;
 			}
-			if ($annotation->{note} !~ /^\d{1,2} [a-z]{3,9} \d{4}$/i) {
+			elsif ($annotation->{note} !~ /^\d{1,2} [a-z]{3,9} \d{4}$/i) {
 				my $error = {
 					'type'		=> 'annotation_error; invalid diaryDate format',
 					'detail'	=> '\''.$annotation->{note}.'\' doesn\'t match expected date format \'dd mmmm yyyy\'',
@@ -579,7 +585,7 @@ sub _data_consistent {
 				$self->data_error($error);
 				return 0;
 			}
-			if ($annotation->{note} !~ /^\d{1,2} [a-z]{3} \d{4}$/i) {
+			elsif ($annotation->{note} !~ /^\d{1,2} [a-z]{3} \d{4}$/i) {
 				my $error = {
 					'type'		=> 'annotation_error; invalid date format',
 					'detail'	=> '\''.$annotation->{note}.'\' doesn\'t match expected date format \'dd mmmm yyyy\'',
@@ -590,7 +596,12 @@ sub _data_consistent {
 		}
 		else {
 			if (!defined $annotation->{note} || $annotation->{note} eq '') {
-				undef;
+				my $error = {
+					'type'		=> 'annotation_error; blank_or_no_note',
+					'detail'	=> '\''.$annotation->{id}.'\' (type \''.$annotation->{type}.'\' has no note value',
+				};
+				$self->data_error($error);
+				return 0;
 			}
 		}
 	}

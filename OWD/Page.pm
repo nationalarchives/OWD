@@ -32,6 +32,7 @@ sub load_classifications {
 			{'subjects.zooniverse_id' => $self->{_page_data}->{zooniverse_id} }
 		);
 	$cur_classifications->fields({'annotations'=>1,'subjects'=>1,'updated_at'=>1,'user_ip'=>1,'user_name'=>1});
+	$cur_classifications->sort({"_id" => 1});
 	if ($cur_classifications->has_next) {
 		print "Iterating through classifications cursor\n" if $debug > 2;
 		while (my $classification = $cur_classifications->next) {
@@ -601,8 +602,11 @@ sub get_date_range {
 		foreach my $cluster (@{$self->{_clusters}{diaryDate}}) {
 			my $consensus_annotation = $cluster->get_consensus_annotation();
 			if (defined($consensus_annotation)) {
+				my $note = $consensus_annotation->get_note();
+				if (ref($note) eq "ARRAY") {
+					next;
+				}
 				my $date_string = $consensus_annotation->get_string_value();
-				print "$date_string\n";
 				my $date = $date_parser->parse_datetime($date_string);
 				if (!defined($date_range->{min})) {
 					$date_range->{min} = $date;
@@ -619,7 +623,9 @@ sub get_date_range {
 			}
 			else {
 				# should we record the clusters that don't have consensus somewhere for easy access later?
-				undef;
+				if ($cluster->count_annotations > 1) {					
+					undef;
+				}
 			}
 		}
 		undef;
@@ -631,8 +637,29 @@ sub resolve_diaryDate_disputes {
 	my ($self) = @_;
 	if (defined $self->{_clusters}{diaryDate}) {
 		foreach my $cluster (@{$self->{_clusters}{diaryDate}}) {
-			if (!defined($cluster->{consensus_annotation}) && $cluster->count_annotations() > 1) {
+			next if (!defined($cluster->get_consensus_annotation()) && $cluster->count_annotations() < 2);
+			if (!defined($cluster->get_consensus_annotation())) {
+				# a diaryDate cluster without a consensus annotation
 				undef;
+				next;
+			}
+			elsif (ref($cluster->get_consensus_annotation()->get_note()) eq "ARRAY") {
+				# a diaryDate with a disputed consensus_annotation
+				# If we get here, we failed to find a consensus on the first pass through the cluster
+				# but we have enough contributions that we can try to infer the correct entry.
+				# First we should get the two (or more) most popular values (there can't be a single
+				# most popular value or it would have been selected in the first pass through establish_consensus() )
+				my $value_counts = $cluster->_get_annotation_value_scores();
+				my $surrounding_dates = $self->{_diary}->get_surrounding_dates_for($self->get_page_num(), ($cluster->get_median_centroid())->[1] );
+				undef;
+			}
+			elsif ($cluster->get_consensus_annotation()->get_note() =~ /\d+ [A-Za-z]{3} \d{4}/) {
+				next;
+			}
+			else {
+				# something else
+				undef;
+				next;
 			}
 		}
 	}

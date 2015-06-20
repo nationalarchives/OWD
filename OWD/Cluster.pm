@@ -36,6 +36,7 @@ my $core_consensus_fields = {
 	'unit'		=> {
 						'name'		=> LONE_USER_SUBMITTED,
 	},
+	'diaryDate'	=> TIE_FOR_MOST_POPULAR_VALUE,
 };
 
 my $diaryDate_y_axis_skew = -2;
@@ -58,7 +59,9 @@ sub new {
 	# from the y axis value because the origin is the top left corner of the page
 	if ($obj->{type} eq 'diaryDate') {
 		$obj->{median_centroid}[1] += $diaryDate_y_axis_skew;
+		$obj->{median_centroid}[1] = 0 if $obj->{median_centroid}[1] < 0;
 		$obj->{centroid}[1] += $diaryDate_y_axis_skew;
+		$obj->{centroid}[1] = 0 if $obj->{centroid}[1] < 0;
 	}
 	$obj->{range} = 0;
 	return $obj;
@@ -89,6 +92,11 @@ sub get_coords {
 sub get_centroid {
 	my ($self) = @_;
 	return $self->{centroid};
+}
+
+sub get_median_centroid {
+	my ($self) = @_;
+	return $self->{median_centroid};
 }
 
 sub calculate_centroid {
@@ -155,38 +163,33 @@ sub distance {
 
 sub establish_consensus {
 	my ($self) = @_;
-	my %value_counts;
-	my $note_type = 'SCALAR';
+
 	# Start building a consensus annotation structure to be blessed as a ConsensusAnnotation later
 	my $consensus_annotation;
 	$consensus_annotation->{type} = $self->{_annotations}[0]{_annotation_data}{type};
 	$consensus_annotation->{coords} = $self->{median_centroid};
-	# tally the number of instances of each value to get a "degree of consensus" score
-	foreach my $annotation (@{$self->{_annotations}}) {
-		if (ref($annotation->{_annotation_data}{standardised_note}) eq 'HASH') {
-			$note_type = 'HASH';
-			foreach my $key (keys %{$annotation->{_annotation_data}{standardised_note}}) {
-				$value_counts{$key}{$annotation->{_annotation_data}{standardised_note}{$key}}++;
-			}
-		}
-		else {
-			$value_counts{$annotation->{_annotation_data}{standardised_note}}++;
-		}
-	}
+	my $value_counts = $self->_get_annotation_value_scores();
 
 	my $enough_consensus = 1; # we'll unset this if an annotation fails consensus requirements
 	my $status_of_field;
 	my $type = $consensus_annotation->{type};
 	my $error;
+	my $note_type;
+	if (ref($value_counts->{ (keys %$value_counts)[0] }) ne "HASH") {
+		$note_type = 'SCALAR';
+	}
+	else {
+		$note_type = 'HASH';
+	}
 	
 	# Find the most popular value for the note (or for each key of the note, if a more complex annotation)
 	if ($note_type eq 'SCALAR') {
-		my @values = reverse sort { $value_counts{$a} <=> $value_counts{$b} } keys %value_counts;
-		if ($value_counts{$values[0]} > 1) {
+		my @values = reverse sort { $value_counts->{$a} <=> $value_counts->{$b} } keys %$value_counts;
+		if ($value_counts->{$values[0]} > 1) {
 			# more than one user agreed on a value, check if there was unanimity on the value 
 			if (defined($values[1])) {
 				# there are at least two opinions for this note field
-				if ($value_counts{$values[0]} > $value_counts{$values[1]}) {
+				if ($value_counts->{$values[0]} > $value_counts->{$values[1]}) {
 					$status_of_field = PLURALITY_CONSENSUS;
 					$consensus_annotation->{standardised_note} = $values[0];
 				}
@@ -194,9 +197,9 @@ sub establish_consensus {
 					$status_of_field = TIE_FOR_MOST_POPULAR_VALUE;
 					# if we get to here we need to make $consensus_annotation an array of possible annotations
 					# to possibly unpick later with more context
-					my $tied_score = $value_counts{$values[0]};
+					my $tied_score = $value_counts->{$values[0]};
 					foreach my $value (@values) {
-						push @{$consensus_annotation->{standardised_note}}, $value if $value_counts{$value} == $tied_score;
+						push @{$consensus_annotation->{standardised_note}}, $value if $value_counts->{$value} == $tied_score;
 					}
 					$error = {
 						'type'		=> 'cluster_error; value_tie',
@@ -213,9 +216,9 @@ sub establish_consensus {
 			if (@values > 1) {
 				# there are several possible values with one vote each
 				$status_of_field = TIE_FOR_MOST_POPULAR_VALUE;
-				my $tied_score = $value_counts{$values[0]};
+				my $tied_score = $value_counts->{$values[0]};
 				foreach my $value (@values) {
-					push @{$consensus_annotation->{standardised_note}}, $value if $value_counts{$value} == $tied_score;
+					push @{$consensus_annotation->{standardised_note}}, $value if $value_counts->{$value} == $tied_score;
 				}
 				$error = {
 					'type'		=> 'cluster_error; value_tie',
@@ -244,6 +247,12 @@ sub establish_consensus {
 			if ($status_of_field < PLURALITY_CONSENSUS) {
 				$enough_consensus = 0;  
 			}
+#			Experimented with resolving diaryDate disputes here, better to do them later with more context than
+#			just the current page.
+#			if ($type eq 'diaryDate' && $self->{_page}->get_page_num() == 18) {
+#				print $self->{_page}->get_page_num(),"\n";
+#				undef;
+#			}
 		}
 	}
 	else {
@@ -252,21 +261,21 @@ sub establish_consensus {
 		# consensus on (for example) the 'ui-id-1' accidental place field, no need to worry or flag it
 		# as a lonely cluster
 		my $is_lonely_cluster = 0;
-		foreach my $key (keys %value_counts) {
-			my @values = reverse sort { $value_counts{$key}{$a} <=> $value_counts{$key}{$b} } keys %{$value_counts{$key}};
-			if ($value_counts{$key}{$values[0]} > 1) {
+		foreach my $key (keys %$value_counts) {
+			my @values = reverse sort { $value_counts->{$key}{$a} <=> $value_counts->{$key}{$b} } keys %{$value_counts->{$key}};
+			if ($value_counts->{$key}{$values[0]} > 1) {
 				# not a lonely cluster, check if there's a tie
 				if (defined($values[1])) {
 					# there are at least two opinions for this note field
-					if ($value_counts{$key}{$values[0]} > $value_counts{$key}{$values[1]}) {
+					if ($value_counts->{$key}{$values[0]} > $value_counts->{$key}{$values[1]}) {
 						$status_of_field->{$key} = PLURALITY_CONSENSUS;
 						$consensus_annotation->{standardised_note}{$key} = $values[0];
 					}
 					else {
 						$status_of_field->{$key} = TIE_FOR_MOST_POPULAR_VALUE;
-						my $tied_score = $value_counts{$key}{$values[0]};
+						my $tied_score = $value_counts->{$key}{$values[0]};
 						foreach my $value (@values) {
-							push @{$consensus_annotation->{standardised_note}{$key}}, $value if $value_counts{$key}{$value} == $tied_score;
+							push @{$consensus_annotation->{standardised_note}{$key}}, $value if $value_counts->{$key}{$value} == $tied_score;
 						}
 						push @$error, {
 							'type'		=> 'cluster_error; value_tie',
@@ -280,11 +289,11 @@ sub establish_consensus {
 				}
 			}
 			else {
-				if (keys %{$value_counts{$key}} > 1) {
+				if (keys %{$value_counts->{$key}} > 1) {
 					$status_of_field->{$key} = TIE_FOR_MOST_POPULAR_VALUE;
-					my $tied_score = $value_counts{$key}{$values[0]};
+					my $tied_score = $value_counts->{$key}{$values[0]};
 					foreach my $value (@values) {
-						push @{$consensus_annotation->{standardised_note}{$key}}, $value if $value_counts{$key}{$value} == $tied_score;
+						push @{$consensus_annotation->{standardised_note}{$key}}, $value if $value_counts->{$key}{$value} == $tied_score;
 					}
 					push @$error, {
 						'type'		=> 'cluster_error; value_tie',
@@ -355,23 +364,27 @@ sub establish_consensus {
 }
 
 sub _get_annotation_value_scores {
-	my ($annotations) = @_;
-	my %value_counts;
+	my ($self) = @_;
+	my $annotations = $self->{_annotations};
+	my $value_counts;
 	my $note_type = 'SCALAR';
 
 	# tally the number of instances of each value to get a "degree of consensus" score
-	foreach my $annotation (@annotations) {
+	if (ref($annotations) ne "ARRAY") {
+		undef;
+	}
+	foreach my $annotation (@$annotations) {
 		if (ref($annotation->{_annotation_data}{standardised_note}) eq 'HASH') {
 			$note_type = 'HASH';
 			foreach my $key (keys %{$annotation->{_annotation_data}{standardised_note}}) {
-				$value_counts{$key}{$annotation->{_annotation_data}{standardised_note}{$key}}++;
+				$value_counts->{$key}{$annotation->{_annotation_data}{standardised_note}{$key}}++;
 			}
 		}
 		else {
-			$value_counts{$annotation->{_annotation_data}{standardised_note}}++;
+			$value_counts->{$annotation->{_annotation_data}{standardised_note}}++;
 		}
 	}
-	return \%value_counts;
+	return $value_counts;
 }
 
 sub get_consensus_annotation {

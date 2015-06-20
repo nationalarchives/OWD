@@ -198,16 +198,19 @@ sub establish_consensus {
 		# for pages that have no consensus on diaryDate clusters, it can be impossible to verify the date on the page in isolation
 		# but if we keep a running tally of the dates across the whole diary, the correct date can often be implied/inferred from the
 		# consensus dates on surrounding pages.
-		# After doing a first pass on establishing consensus, we can reprocess the disputed clusters with the consensus clusters elsewhere.
-		# In particular, look for no-consensus diaryDate fields and no-consensus person fields.
-		# TODO: get the range of consensus diaryDates per page, then use this to inform the decision on disputed dates.
-		# Create subs for OWD::Page->get_consensus_date_range()
-		$self->{date_range}{$page->get_page_num()} = $page->get_date_range();
 	}
-	$self->report_date_ranges_per_page();
-	foreach my $page (@{$self->{_pages}}) {
-		$page->resolve_diaryDate_disputes();
-	}
+#	$self->report_date_ranges_per_page();
+	# After doing a first pass on establishing consensus, we can reprocess the disputed clusters with the consensus clusters elsewhere.
+	# In particular, look for no-consensus diaryDate fields and no-consensus person fields.
+	# TODO: get the range of consensus diaryDates per page, then use this to inform the decision on disputed dates.
+	# Create subs for OWD::Page->get_consensus_date_range()
+	$self->create_date_lookup();
+#	foreach my $page (@{$self->{_pages}}) {
+#		$self->{date_range}{$page->get_page_num()} = $page->get_date_range();
+#	}
+#	foreach my $page (@{$self->{_pages}}) {
+#		$page->resolve_diaryDate_disputes();
+#	}
 	undef;	
 }
 
@@ -230,7 +233,7 @@ sub report_date_ranges_per_page {
 	my $filename = $self->get_zooniverse_id()."-date_ranges.tsv";
 	open my $ofh, ">",  "output/$filename";
 	print $ofh "Page\tmin\tmax\n";
-	foreach my $page_num (sort {$a <=> $b} keys $self->{date_range}) {
+	foreach my $page_num (sort {$a <=> $b} keys %{$self->{date_range}}) {
 		next if (!defined $self->{date_range}{$page_num}{min});
 		print $ofh "$page_num\t";
 		foreach (@{$self->{date_range}{$page_num}}{'min','max'}) {
@@ -258,20 +261,19 @@ sub create_date_lookup {
 	#iterate through each page by ascending page number
 	foreach my $page (@{$self->{_pages}}) {
 		my $page_num = $page->get_page_num();
-		print "create_date_lookup, page $page_num\n" if $debug > 2;
-		if ($page_num == 182) {
+		if ($page_num == 90) {
 			undef; # DEBUG DELETE
 		}
+		print "create_date_lookup, page $page_num\n" if $debug > 2;
 		$date_lookup->{$page_num} = {};
 		my $page_date_lookup = $date_lookup->{$page_num}; # the section of the $date_lookup hash referencing the current page
-		my $page_anomalies = {}; # a hash for any anomalies and their y coordinates 
 		$page_date_lookup->{0}{friendly} = $current_date;
 		$page_date_lookup->{0}{sortable} = $current_sortable_date;
 		if (defined $page->{_clusters}{diaryDate}) {
 			foreach my $cluster (sort { $a->{median_centroid}[1] <=> $b->{median_centroid}[1] } @{$page->{_clusters}{diaryDate}}) {
 				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
-					my $date_y_coord = $cluster->{median_centroid}[1];
-					if (ref($consensus_annotation) eq 'ARRAY') {
+					my $date_y_coord = ($cluster->get_median_centroid())->[1];
+					if (ref($consensus_annotation->get_note()) eq 'ARRAY') {
 						# we have multiple possible dates for this cluster. Check the difference
 						# from the last known date, and use the closest.
 						my $smallest_distance_from_last_known_good;
@@ -280,7 +282,7 @@ sub create_date_lookup {
 						while (ref($page_date_lookup->{$last_known_good_row}) ne 'HASH') {
 							$last_known_good_row = _get_previous_date_row_number($page_date_lookup,$last_known_good_row);
 						}
-						foreach my $possible_value (@$consensus_annotation) {
+						foreach my $possible_value (@{$consensus_annotation->get_note()}) {
 							my $sortable_date = get_sortable_date($possible_value);
 							my $distance_from_last_known_good = $sortable_date - $page_date_lookup->{$last_known_good_row}{sortable};
 							if ($distance_from_last_known_good >= 0 && (!defined($smallest_distance_from_last_known_good) || $distance_from_last_known_good < $smallest_distance_from_last_known_good)) {
@@ -288,7 +290,8 @@ sub create_date_lookup {
 								$smallest_distance_from_last_known_good = $distance_from_last_known_good;
 							}
 						}
-						$cluster->{consensus_value} = $selected_value;
+						#$cluster->{consensus_value} = $selected_value;
+						$consensus_annotation->set_note($selected_value);
 						my $error = {
 							'type'		=> 'cluster_error; disputed_value_tie',
 							'detail'	=> 'the diaryDate value for the cluster at '.$cluster->{median_centroid}[0].','.$cluster->{median_centroid}[1].' is disputed. Resolved by reference to undisputed neighbouring clusters',
@@ -297,7 +300,17 @@ sub create_date_lookup {
 					}
 					if (defined($page_date_lookup->{$date_y_coord})) {
 						# we already have a date for this page number and row.
-						if (ref($page_date_lookup->{$date_y_coord}) eq 'HASH' 
+						if ($date_y_coord == 0 && ref($page_date_lookup->{$date_y_coord}) eq "HASH" && !defined($page_date_lookup->{$date_y_coord}{cluster})) {
+							# if this is row 0, we may have an annotation brought over from the previous page
+							# If we have an explicit annotation for row 0, we should replace the date that was 
+							# brought across from the previous page as it isn't needed.
+							# It should be easy to tell the date that was brought across as it doesn't
+							# relate to a cluster.
+							$page_date_lookup->{$date_y_coord}{friendly} = $consensus_annotation->get_string_value();
+							$page_date_lookup->{$date_y_coord}{sortable} = get_sortable_date($page_date_lookup->{$date_y_coord}{friendly});
+							$page_date_lookup->{$date_y_coord}{cluster} = $cluster;
+						}
+						elsif (ref($page_date_lookup->{$date_y_coord}) eq 'HASH' 
 							&& $page_date_lookup->{$date_y_coord}{friendly} ne $consensus_annotation->get_string_value()) {
 							# if the row has a single date so far, and it's different from the one
 							# we've just found, convert this value to an array and deal with it when 
@@ -310,32 +323,51 @@ sub create_date_lookup {
 						elsif (ref($page_date_lookup->{$date_y_coord}) eq 'ARRAY') {
 							# we have at least three dates for this row.
 							# Add the new date to the existing array for dealing with later
-							push @{$page_date_lookup->{$date_y_coord}}, {'friendly' => $consensus_annotation->get_string_value(), 'sortable' => get_sortable_date($consensus_annotation->get_string_value()), 'cluster' => $cluster};
+							my $date_already_recorded_for_this_row = 0;
+							foreach my $recorded_date (@{$page_date_lookup->{$date_y_coord}}) {
+								if ($recorded_date->{friendly} eq $consensus_annotation->get_string_value()) {
+									$date_already_recorded_for_this_row = 1;
+									last;
+								}
+							}
+							if (!$date_already_recorded_for_this_row) {
+								push @{$page_date_lookup->{$date_y_coord}}, {'friendly' => $consensus_annotation->get_string_value(), 'sortable' => get_sortable_date($consensus_annotation->get_string_value()), 'cluster' => $cluster};
+							}
 						}
 					}
 					else {
 #						$page_date_lookup->{$date_y_coord}{friendly} = $selected_value;
 #						$page_date_lookup->{$date_y_coord}{sortable} = get_sortable_date($selected_value);
-						
+						if (!defined($consensus_annotation->get_string_value())) {
+							undef;
+						}
 						$page_date_lookup->{$date_y_coord}{friendly} = $consensus_annotation->get_string_value();
 						$page_date_lookup->{$date_y_coord}{sortable} = get_sortable_date($page_date_lookup->{$date_y_coord}{friendly});
 						$page_date_lookup->{$date_y_coord}{cluster} = $cluster;
 						# ^ circular reference?
 					}
 				}
+				elsif ($cluster->count_annotations() < 2) {
+					# do nothing - a single annotation cluster is generally useless.
+				}
+				else {
+					# this diaryDate cluster has no consensus annotation (and not for lack of annotations)
+					undef;
+				}
 			}
 			my @rows = sort {$a <=> $b} keys %$page_date_lookup;
 			# resolve any instances of multiple dates for a row here.
 			foreach my $row (@rows) {
 				if (ref($page_date_lookup->{$row}) eq 'ARRAY') {
-					# of the two dates we now have for this row, confirm they are both later
-					# than the immediately preceeding row. If they both are, select the earlier one
+					# of the multiple dates we now have for this row, confirm they are later
+					# than the immediately preceeding row. If they are, select the earlier one
 					# on the basis that this case is often caused by an entry like "15th-30th Sep"
 					my $previous_row = _get_previous_date_row_number($page_date_lookup,$row,\@rows);
 					my $qualified_dates = [];
 					foreach my $user_contributed_date (@{$page_date_lookup->{$row}}) {
 						if (ref($user_contributed_date) ne "HASH" || ref($page_date_lookup->{$previous_row}) ne "HASH") {
 							undef;
+							next;
 						}
 						if ($user_contributed_date->{sortable} > $page_date_lookup->{$previous_row}{sortable}) {
 							push @$qualified_dates, $user_contributed_date;
@@ -353,6 +385,7 @@ sub create_date_lookup {
 					else {
 						# none of the dates qualified - delete this $page_date_lookup row.
 						delete $page_date_lookup->{$row};
+						@rows = sort {$a <=> $b} keys %$page_date_lookup;
 					}
 				}
 			}
@@ -378,6 +411,15 @@ sub get_date_for {
 	return $date_lookup->{$page}{$closest_date_row_above};
 }
 
+sub get_surrounding_dates_for {
+	my ($self, $page, $row) = @_;
+	if (keys %$date_lookup < 1) {
+		$self->create_date_lookup();
+	}
+	my $date_lookup_slice = @{$date_lookup}{$page-1,$page,$page+1};
+	undef;
+}
+
 sub create_place_lookup {
 	my ($self) = @_;
 	my $current_place = "";
@@ -390,7 +432,6 @@ sub create_place_lookup {
 		my $page_num = $page->get_page_num();
 		$place_lookup->{$page_num} = {};
 		my $page_place_lookup = $place_lookup->{$page_num}; # the section of the $place_lookup hash referencing the current page
-		my $page_anomalies = {}; # a hash for any anomalies and their y coordinates 
 		$page_place_lookup->{0} = $current_place;
 		if (defined $page->{_clusters}{place}) {
 			foreach my $cluster (sort { $a->{median_centroid}[1] <=> $b->{median_centroid}[1] } @{$page->{_clusters}{place}}) {
@@ -824,6 +865,9 @@ sub _get_previous_date_row_number {
 
 sub get_sortable_date {
 	my ($date_string) = @_;
+	if ($date_string !~ /^\d{1,2} [a-z]{3} \d{4}$/i) {
+		undef;
+	}
 	$date_string =~ /(\d+) (\w{3}) (\d{4})/;
 	my $sortable_date = int($3.sprintf("%02d",$month{$2}).sprintf("%02d",$1));
 	return $sortable_date;

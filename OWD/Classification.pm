@@ -80,6 +80,14 @@ sub new {
 				push @_annotations, $obj_annotation;
 				$coord_check->{$coord_check_string} = $obj_annotation;
 			}
+			else {
+				# Annotation object was not successfully created, most likely because of a data error
+#				unless (($annotation->{type} eq "diaryDate" || $annotation->{type} eq "date" ) && !defined($annotation->{note})) {
+#					print "Annotation $annotation->{id} rejected\n";
+#					print Dumper $annotation;
+#					undef;
+#				}
+			}
 		}
 		$classification_obj->{_num_annotations}++;
 		print "Annotation object created and added to classification\n" if $debug > 2;
