@@ -171,4 +171,38 @@ sub data_error {
 	$self->get_error_collection->insert($error_hash);
 }
 
+=pod
+
+=head1 NAME
+
+OWD::Processor - base module for OWD processing modules, holding DB connection handles and providing accessor to diaries
+
+=head1 VERSION
+
+v0.1
+
+=head1 SYNOPSIS
+
+use OWD::Processor;
+
+my $owd = OWD::Processor->new();
+
+$owd->set_database(<MongoDB::Database>);	reference to the OWD MongoDB database
+
+$owd->set_output_db(<MongoDB::Database>);	reference to a MongoDB database to which the consensus data should be written
+
+$owd->set_logging_db(<MongoDB::Database>);	reference to a MongoDB database where diagnostic information about the processing can be written
+
+$owd->set_tags_db(<MongoDB::Database>);		if a copy of the Operation War Diary Talk forum database is available it can be included here (the intent is to allow extraction of hashtags and data)
+
+$owd->set_confirmed_db(<MongoDB::Database>); Experimental work in progress
+
+my $diary = $owd->get_diary([string diary_id]);	Returns an OWD::Diary object against which processing operations can be performed
+
+=head1 DESCRIPTION
+
+=head1 SUBROUTINES/METHODS
+
+=cut
+
 1;

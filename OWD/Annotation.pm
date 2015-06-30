@@ -94,14 +94,11 @@ my $free_text_fields = {
 sub new {
 	my ($class, $_classification, $_annotation) = @_;
 	print "OWD::Annotation->new() called on $_annotation->{id}\n" if $debug > 2;
-#	if ($_annotation->{id} eq "AWD0000gk7_migginspies_53_69") {
-#		undef; # DEBUG DELETE
-#	}
 	# some "cleaning" needs to be done to the raw data to improve chances of consensus
 	# - extraneous spacing and punctuation were sometimes added by users in free text fields
 	# - bugs in the application allowed things like inconsistent date formats, invalid dates, 
 	# - different but valid ways of representing the same thing (like unit full names vs abbreviations)
-	# - users finding different ways of representing uncertainty
+	# - users finding different ways of representing uncertainty (eg inserting question marks in place of illegible characters)
 
 	my $obj = bless {
 		'_classification'		=> $_classification,
@@ -138,6 +135,8 @@ sub new {
 			$obj->{_annotation_data}{standardised_note}{surname} = 'H M The King';
 		}
 		
+		# The following block loops through some data-fixing processes to improve the chances of consensus by removing unnecessary or 
+		# accidental superfluous punctuation, standardising the representation of persons' initials,etc.
 		my $data_has_been_modified = 0;
 		do {
 			$data_has_been_modified = 0;
@@ -158,6 +157,9 @@ sub new {
 				}
 			}
 		} until ($data_has_been_modified == 0);
+#		if ($obj->{_annotation_data}{type} eq "diaryDate" && $obj->{_annotation_data}{standardised_note} !~ /^\d{1,2} [a-z]{3} \d{4}$/i) {
+#			undef;
+#		}
 		return $obj;
 	}
 	else {
@@ -177,7 +179,7 @@ sub get_type {
 sub get_field {
 	my ($self,$field) = @_;
 	if (!defined $self->{_annotation_data}{standardised_note}{$field}) {
-		return undef;
+		return;
 	}
 	return $self->{_annotation_data}{standardised_note}{$field};
 }
@@ -517,6 +519,8 @@ sub _fix_known_errors {
 }
 
 sub _data_consistent {
+	# This method is called during the creation of the annotation object, a bare minimal check that the data for the particular
+	# annotation is usable at all.
 	# TODO: Rather than dropping an annotation with insufficient information (eg a diaryDate that's not in
 	# ^\d{1,2} [a-z]{3} \d{4}$/ format) maybe we could remove anything inconsistent and save the correct but
 	# incomplete information?
@@ -536,6 +540,7 @@ sub _data_consistent {
 	
 	my $annotation = $self->{_annotation_data};
 	if (defined $annotation->{type}) {
+		# TODO: lots of types are missing from this section. Could reliability be improved by adding checks here for the missing types?
 		# This block validates the entries according to their data types
 		if ($annotation->{type} eq 'doctype' && !defined($valid_doctypes->{$annotation->{note}})) {
 			my $error = {

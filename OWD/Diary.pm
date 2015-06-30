@@ -2,9 +2,10 @@ package OWD::Diary;
 use strict;
 use warnings;
 use OWD::Page;
+use Carp;
 use Data::Dumper;
 
-my $debug = 3;
+my $debug = 1;
 my $date_lookup = {};
 my $place_lookup = {};
 
@@ -56,6 +57,7 @@ sub load_pages {
 	if ($cur_subjects->has_next) {
 		push @stage,{'stage' => '','time' => time()};
 		while (my $subject = $cur_subjects->next) {
+			# OWD::Page->new() creates a Page object with the passed metadata
 			push @$subjects_ref, OWD::Page->new($self,$subject);
 		}
 	}
@@ -130,6 +132,11 @@ sub get_iaid {
 	return $self->{_group_data}{metadata}{id};
 }
 
+sub get_start_date {
+	my ($self) = @_;
+	return $self->{_group_data}{metadata}{start_date};
+}
+
 sub get_zooniverse_id {
 	my ($self) = @_;
 	return $self->{_group_data}{zooniverse_id};
@@ -138,7 +145,7 @@ sub get_zooniverse_id {
 sub strip_multiple_classifications_by_single_user {
 	my ($self) = @_;
 	if (!defined $self->{_pages}) {
-		$self->load_pages();
+		croak((caller(0))[3]." called before load_pages and load_classifications have been called");
 	}
 	foreach my $page (@{$self->{_pages}}) {
 		$page->strip_multiple_classifications_by_single_user();
@@ -250,28 +257,52 @@ sub create_date_lookup {
 	my ($self) = @_;
 	# TODO: This sub runs after the establish_consensus() subroutine, but some diaryDate clusters may not have reached consensus
 	# (I've seen examples where there is disagreement about the year for a page where the author neglected to include the year in
-	# the dates.
-	my $start_date = $self->{_group_data}{metadata}{start_date};
+	# the dates.)
+	# First, get the start date of the diary from the TNA Discovery Catalogue metadata
+	my $start_date = $self->get_start_date();
 	my $current_date = $start_date->day()." ".$start_date->month_abbr()." ".$start_date->year();
+	if ($current_date !~ /^\d{1,2} [a-z]{3} \d{4}/i) {
+		undef;
+	}
 	my $current_sortable_date = get_sortable_date($current_date);
 
 	if (!defined $self->{_pages}) {
 		$self->load_pages();
 	}
-	#iterate through each page by ascending page number
+
+	# iterate through each page by ascending page number. Prepare the object hash reference, $date_lookup for content.
+	# It will be keyed by page number then y-coordinate, later allowing a date lookup given those two parameters 
 	foreach my $page (@{$self->{_pages}}) {
 		my $page_num = $page->get_page_num();
-		if ($page_num == 90) {
-			undef; # DEBUG DELETE
-		}
 		print "create_date_lookup, page $page_num\n" if $debug > 2;
 		$date_lookup->{$page_num} = {};
 		my $page_date_lookup = $date_lookup->{$page_num}; # the section of the $date_lookup hash referencing the current page
+		
+		# Before we process any annotations for the current page, set the date lookup for y-coord 0 to the $current_date value
+		# For the first page of the diary, this is set to the StartDate field from the TNA Discovery Catalogue. For subsequent pages,
+		# it is set to the last known date from the previous page
 		$page_date_lookup->{0}{friendly} = $current_date;
 		$page_date_lookup->{0}{sortable} = $current_sortable_date;
+		
+		# If there are no further dates on the page, this will be the only date lookup for the page. If there are other diaryDate
+		# type annotations, iterate through them now, ascending sequentially by y-coordinate
 		if (defined $page->{_clusters}{diaryDate}) {
+			# The rest of the subroutine proceeds as follows for each cluster:
+			# Is there a consensus_annotation?
+			#  Y:	Does it have multiple possible values?
+			#		 Y:	Find the previous date row on this page with a single date
+			#			TODO: This should go back beyond page boundaries if necessary
+			#			Select whichever of the possible dates is the closest later date than the previous known
+			#			If a date is not selected, skip this cluster
+			# Do we already have a date for this row?
+			#  Y:	If it's row 0, replace the date we inferred from the previous page
+			#		If it's another row, and different from the new row date we found, make an array to sort out later.
+			#		If it's already an array, add this date to the list
+			#  N:	Add the new date as the value for this row.
+			
 			foreach my $cluster (sort { $a->{median_centroid}[1] <=> $b->{median_centroid}[1] } @{$page->{_clusters}{diaryDate}}) {
 				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
+					# There was consensus for the date at this cluster
 					my $date_y_coord = ($cluster->get_median_centroid())->[1];
 					if (ref($consensus_annotation->get_note()) eq 'ARRAY') {
 						# we have multiple possible dates for this cluster. Check the difference
@@ -290,13 +321,23 @@ sub create_date_lookup {
 								$smallest_distance_from_last_known_good = $distance_from_last_known_good;
 							}
 						}
-						#$cluster->{consensus_value} = $selected_value;
-						$consensus_annotation->set_note($selected_value);
-						my $error = {
-							'type'		=> 'cluster_error; disputed_value_tie',
-							'detail'	=> 'the diaryDate value for the cluster at '.$cluster->{median_centroid}[0].','.$cluster->{median_centroid}[1].' is disputed. Resolved by reference to undisputed neighbouring clusters',
-						};
-						$self->data_error($error);
+						if (defined $selected_value) {
+							$consensus_annotation->set_note($selected_value);
+							my $error = {
+								'type'		=> 'cluster_error; disputed_value_tie_resolved',
+								'detail'	=> 'the diaryDate value for the cluster at '.$cluster->{median_centroid}[0].','.$cluster->{median_centroid}[1].' is disputed. Resolved by reference to undisputed neighbouring clusters',
+							};
+							$self->data_error($error);
+						}
+						else {
+							my $error = {
+								'type'		=> 'cluster_error; disputed_value_tie_unresolved',
+								'detail'	=> 'the diaryDate value for the cluster at '.$cluster->{median_centroid}[0].','.$cluster->{median_centroid}[1].' is disputed with insufficient supporting data to resolve',
+							};
+							$self->data_error($error);
+							undef;
+							next; # skip this cluster
+						}
 					}
 					if (defined($page_date_lookup->{$date_y_coord})) {
 						# we already have a date for this page number and row.
@@ -348,7 +389,7 @@ sub create_date_lookup {
 					}
 				}
 				elsif ($cluster->count_annotations() < 2) {
-					# do nothing - a single annotation cluster is generally useless.
+					# There was no consensus for this cluster, but with less than 2 annotations, that's understandable
 				}
 				else {
 					# this diaryDate cluster has no consensus annotation (and not for lack of annotations)
@@ -879,5 +920,42 @@ sub DESTROY {
 		$page->DESTROY();
 	}
 }
+
+=pod
+
+=head1 NAME
+
+OWD::Diary - a class representing a single War diary, analagous to a document from the war_diary_groups collection of the OWD Mongo database
+
+=head1 VERSION
+
+v0.1
+
+=head1 SYNOPSIS
+
+use OWD::Diary;
+
+my $diary = OWD::Diary->new();	returns a Diary object with only the diary-level metadata loaded 
+
+$diary->load_pages();		Loads the page metadata from the Mongo db into tbe diary object
+
+
+=head1 DESCRIPTION
+
+=head1 SUBROUTINES/METHODS
+
+=head2 load_pages
+
+	$diary->load_pages();
+	
+Loads the page metadata from the Mongo database into the diary object
+
+=head2 load_classifications
+
+	$diary->load_classifications
+	
+Loads the user classifications from the database
+
+=cut
 
 1;

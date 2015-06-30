@@ -32,19 +32,23 @@ $owd->set_confirmed_db($confirmed_db);
 my $total_raw_tag_counts;
 my $diary_count = 0;
 
-my $diary_id;
-if ($ARGV[0] =~ /^GWD/) {
-	$diary_id = $ARGV[0];
+my @diary_ids;
+if (@ARGV) {
+	foreach my $diary_id (@ARGV) {
+		if ($diary_id =~ /^GWD/) {
+			my $diary = $owd->get_diary($diary_id);
+			diary_tasks($diary);
+		}
+	}
 }
 else {
-	$diary_id = '';
+	while (my $diary = $owd->get_diary()) {
+		diary_tasks($diary);
+	}
 }
 
-# OWD::Processor::get_diary() fetches the requested diary (or iterates through all the diaries in the DB if
-# called with an empty parameter list). It loads the diary data, then loads page data too
-my $diary = $owd->get_diary($diary_id);
-#while (my $diary = $owd->get_diary())
-{
+sub diary_tasks {
+	my ($diary) = @_;
 	$diary_count++;
 	my $diary_id = $diary->get_zooniverse_id();
 	print "Processing diary $diary_id\n";
@@ -53,9 +57,10 @@ my $diary = $owd->get_diary($diary_id);
 	$owd->get_logging_db()->get_collection('log')->remove({"diary.group_id" => "$diary_id"});
 	print "$diary_count: ",$diary->get_docref()," (".$diary->get_zooniverse_id().")\n";
 	if ($diary->get_status() eq "complete") {
-		$diary->load_pages();
+		$diary->load_pages(); # loads all the per-page metadata into the Diary object
 		print "Loading classifications\n";
-		# OWD::Diary::load_classifications() iterates through each page of the current diary loading classifications
+		# OWD::Diary::load_classifications() iterates through each page of the current diary loading classifications, tidying them up 
+		# as necessary before creating a classification object
 		my $num_pages_with_classifications = $diary->load_classifications();
 		$diary->strip_multiple_classifications_by_single_user();
 		$diary->report_pages_with_insufficient_classifications();

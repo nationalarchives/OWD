@@ -38,12 +38,13 @@ sub load_classifications {
 		while (my $classification = $cur_classifications->next) {
 			push @$_classifications, OWD::Classification->new($self,$classification);
 		}
-		$self->{_classifications} = $_classifications;
+		my $sorted_classifications = [sort {$a->{_classification_data}{user_name} cmp $b->{_classification_data}{user_name}} @$_classifications];
+		$self->{_classifications} = $sorted_classifications;
 		undef $cur_classifications;
 		return 1;
 	}
 	else {
-		return undef;
+		return;
 	}
 }
 
@@ -67,7 +68,7 @@ sub load_hashtags {
 		return 1;
 	}
 	else {
-		return undef;
+		return;
 	}
 }
 
@@ -214,11 +215,11 @@ sub get_doctype {
 	my ($self) = @_;
 	unless (defined($self->{_clusters})) {
 		carp("get_doctype called on OWD::Page object before annotations have been clustered");
-		return undef;
+		return;
 	}
 	my $consensus_annotation = $self->{_clusters}{doctype}[0]->get_consensus_annotation();
 	if (ref($consensus_annotation) ne 'OWD::ConsensusAnnotation') {
-		return undef;
+		return;
 	}
 	else {
 		return $self->{_clusters}{doctype}[0]->get_consensus_annotation()->get_string_value();
@@ -249,7 +250,7 @@ sub cluster_tags {
 	}
 	foreach my $type (keys %$annotations_by_type_and_user) {
 		next if $type eq 'doctype';
-		# for this tag type, who has the most tags. Use their tags to create the skeleton cluster layout
+		# for this tag type, who has the most tags? Use their tags to create the skeleton cluster layout
 		my $user_annotations_by_type_popularity = _num_tags_of_type($annotations_by_type_and_user->{$type});
 		my $first_user_for_this_type = 1;
 		foreach my $num_annotations (reverse sort {$a <=> $b} keys %$user_annotations_by_type_popularity) {
@@ -386,11 +387,11 @@ sub acceptable_distance {
 			return $diff;
 		}
 		else {
-			return undef;
+			return;
 		}
 	}
 	else {
-		return undef;
+		return;
 	}
 }
 

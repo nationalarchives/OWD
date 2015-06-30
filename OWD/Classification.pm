@@ -93,7 +93,8 @@ sub new {
 		print "Annotation object created and added to classification\n" if $debug > 2;
 	}
 	delete $_classification->{annotations}; # separate the individual annotations from the classification object
-	$classification_obj->{_annotations} = \@_annotations;
+	my $sorted_annotations = [sort {$a->{_annotation_data}{id} cmp $b->{_annotation_data}{id}} @_annotations];
+	$classification_obj->{_annotations} = $sorted_annotations;
 	undef %$coord_check;
 	return $classification_obj;
 }
@@ -186,5 +187,36 @@ sub DESTROY {
 	}
 	$self->{_page} = undef;
 }
+
+=pod
+
+=head1 NAME
+
+OWD::Classification - a class representing a single user classification of a page, analagous to a document from the war_diary_classifications collection of the OWD Mongo database.
+
+=head1 VERSION
+
+v0.1
+
+=head1 SYNOPSIS
+
+use OWD::Classification;
+
+my $classification = OWD::Classification->new(<OWD::Page>, $classification_document_ref);
+
+
+=head1 DESCRIPTION
+
+=head1 SUBROUTINES/METHODS
+
+=head2 new
+
+	OWD::Classification->new(<OWD::Page>, $classification_document_ref);
+	
+Creates a Classification object. Required parameters are the OWD::Page object to which the classification refers, and the classification hash returned by the find() Mongo command
+
+The constructor doesn't load the data exactly as is, but does some QA checks to filter out known data issues.
+
+=cut
 
 1;
