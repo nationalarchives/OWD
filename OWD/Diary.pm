@@ -4,6 +4,7 @@ use warnings;
 use OWD::Page;
 use Carp;
 use Data::Dumper;
+use DateTime::Format::Natural;
 
 my $debug = 1;
 my $date_lookup = {};
@@ -255,6 +256,313 @@ sub report_date_ranges_per_page {
 
 sub create_date_lookup {
 	my ($self) = @_;
+	my $acceptable_date_jump = 18; # the number of days between two entries in the diary before we trigger
+								   # more checking
+	my $date_parser = DateTime::Format::Natural->new();
+	# This sub runs after the establish_consensus() subroutine, but some diaryDate clusters may not have reached consensus
+	# (I've seen examples where there is disagreement about the year for a page where the author neglected to include the year in
+	# the dates.)
+	# First, get the start date of the diary from the TNA Discovery Catalogue metadata
+	my $start_date = $self->get_start_date();
+	my $current_date->{friendly} = $start_date->day()." ".$start_date->month_abbr()." ".$start_date->year();
+	if ($current_date->{friendly} !~ /^\d{1,2} [a-z]{3} \d{4}/i) {
+		undef;
+	}
+	$current_date->{sortable} = get_sortable_date($current_date->{friendly});
+	my $dt_current_date = $date_parser->parse_datetime($current_date->{friendly});
+
+	if (!defined $self->{_pages}) {
+		$self->load_pages();
+	}
+
+	# iterate through each page by ascending page number. Prepare the object hash reference, $date_lookup for content.
+	# It will be keyed by page number then y-coordinate, later allowing a date lookup given those two parameters 
+	foreach my $page (@{$self->{_pages}}) {
+		my $page_num = $page->get_page_num();
+		print "create_date_lookup, page $page_num\n" if $debug > 2;
+		$date_lookup->{$page_num} = {};
+		my $page_date_lookup = $date_lookup->{$page_num}; # the section of the $date_lookup hash referencing the current page
+		
+		# Before we process any annotations for the current page, set the date lookup for y-coord 0 to the $current_date value
+		# For the first page of the diary, this is set to the StartDate field from the TNA Discovery Catalogue. For subsequent pages,
+		# it is set to the last known date from the previous page
+		my %temp_var = %{$current_date};
+		$page_date_lookup->{0} = \%temp_var; 
+		
+		# If there are no further dates on the page, this will be the only date lookup for the page. If there are other diaryDate
+		# type annotations, iterate through them now, ascending sequentially by y-coordinate
+		if (defined $page->{_clusters}{diaryDate}) {
+			foreach my $cluster (sort { $a->{median_centroid}[1] <=> $b->{median_centroid}[1] } @{$page->{_clusters}{diaryDate}}) {
+				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
+					# There was consensus for the date at this cluster
+					my $date_y_coord = ($cluster->get_median_centroid())->[1];
+
+					if (ref($consensus_annotation->get_note()) eq 'ARRAY') {
+						# we have multiple possible dates for this cluster. Check the difference
+						# from the last known date ($current_date), and use the closest.
+						my $distance_from_current;
+						my $index_of_selected_annotation;
+						my $selected_value;
+						for (my $i = 0; $i < @{$consensus_annotation->get_note()}; $i++) {
+							my $annotation_option = ${$consensus_annotation->get_note()}[$i];
+							if ($annotation_option =~ /^\d{1,2} [a-z]{3} \d{4}$/i) {
+								my $dt_annotation_option = $date_parser->parse_datetime($annotation_option);
+								$distance_from_current->{$i} = $dt_annotation_option->delta_days($dt_current_date)->delta_days();
+								if ($distance_from_current->{$i} > $acceptable_date_jump) {
+									print "Page ",$page->get_zooniverse_id(),". Most recent date was $current_date->{friendly}. The current non-consensus date option is $annotation_option. The date difference of $distance_from_current->{$i} is greater than the one we determined to be acceptable ($acceptable_date_jump). What do we do here?\n" if $debug > 2;
+									next; # ignore this annotation from the list if the date jump is too great.
+								}
+								if (DateTime->compare($dt_current_date,$dt_annotation_option) <= 0) {
+									if (!defined $index_of_selected_annotation
+											|| $distance_from_current->{$index_of_selected_annotation} > $distance_from_current->{$i}) {
+										$index_of_selected_annotation = $i;
+									}
+								}	
+							}
+							else {
+								# one of the array of possible dates isn't in the right format
+								undef;
+							}
+						}
+						if (!defined $index_of_selected_annotation) {
+							# The rules didn't select a favoured annotation - maybe they were all earlier than the latest date we had reached?
+							undef;
+						}
+						else {
+							$selected_value = ${$consensus_annotation->get_note()}[$index_of_selected_annotation];
+						}
+						if (defined $selected_value) {
+							$consensus_annotation->set_note($selected_value);
+							my $error = {
+								'type'		=> 'cluster_error; disputed_value_tie_resolved',
+								'detail'	=> 'the diaryDate value for the cluster at '.$cluster->{median_centroid}[0].','.$cluster->{median_centroid}[1].' is disputed. Resolved by reference to undisputed neighbouring clusters',
+							};
+							$self->data_error($error);
+						}
+						else {
+							my $error = {
+								'type'		=> 'cluster_error; disputed_value_tie_unresolved',
+								'detail'	=> 'the diaryDate value for the cluster at '.$cluster->{median_centroid}[0].','.$cluster->{median_centroid}[1].' is disputed with insufficient supporting data to resolve',
+							};
+							$self->data_error($error);
+							undef;
+							next; # skip this cluster
+						}
+					}
+					
+					# check that the single value we have now is sensible (not too far from the previous date we had.
+					my $consensus_date_friendly = $consensus_annotation->get_string_value();
+					if ($consensus_date_friendly !~ /^\d{1,2} [a-z]{3} \d{4}$/i) {
+						# The consensus date isn't of the right format.
+						undef;
+					}
+					else {
+						# Get DateTime objects for $consensus_date_friendly and $current_date, then check for an acceptable distance between them
+						my $dt_consensus = $date_parser->parse_datetime($consensus_date_friendly);
+						my $diff_days = $dt_consensus->delta_days($dt_current_date)->delta_days();
+						if (DateTime->compare($dt_current_date,$dt_consensus) <= 0) {
+							# $consensus_date_friendly is later than the $current_date so far (correct order)
+							if ($diff_days >= 0 && $diff_days < $acceptable_date_jump) {
+								# the $consensus_date_friendly doesn't take a huge jump into the future
+								undef;
+							}
+							elsif ($diff_days >= $acceptable_date_jump && $diff_days < 30) {
+								# a suspect datejump, but happens sometimes.
+								undef;
+							}
+							else {
+								# $consensus_date_friendly is later than $current_date, but there's a big jump
+								undef;
+								my $year_length_in_days = 365;
+								for (my $year_error_margin = 1; $year_error_margin < 5; $year_error_margin++) {
+									my $test_min = $year_length_in_days * $year_error_margin - $acceptable_date_jump;
+									my $test_max = $year_length_in_days * $year_error_margin + $acceptable_date_jump;
+									if ($diff_days > $test_min && $diff_days < $test_max) {
+										print "Page ",$page->get_zooniverse_id(),". $consensus_date_friendly is probably $year_error_margin years out. Current date is $current_date->{friendly}\n" if $debug > 2;
+										# then use DateTime math to subtract the appropriate number of years.
+										$dt_consensus->subtract( years => $year_error_margin );
+										$consensus_annotation->set_note($dt_consensus->day()." ".$dt_consensus->month_abbr()." ".$dt_consensus->year());
+										my $error = {
+											'type'		=> 'cluster_error; incorrect_year_fixed',
+											'detail'	=> 'the diaryDate value \''.$consensus_date_friendly.'\' for the cluster at '.$cluster->{median_centroid}[0].','.$cluster->{median_centroid}[1].' was fixed by changing the year to make it closer to the previously found date, \''.$current_date->{friendly}.'\'',
+										};
+										$self->data_error($error);
+										last;
+									}
+								}
+								# TODO: Check +/- a month for new dates that seem to be a big jump but only if there is significant dispute of the value anyway
+#								my $days_acceptable_diff_for_testing_other_months = 3;
+#								for (my $month_error_margin = 1; $month_error_margin < 3; $month_error_margin++) {
+#									my $dt_test_date = $dt_consensus->clone();
+#									$dt_test_date->subtract( months => $month_error_margin );
+#									my $test_diff = $dt_test_date->delta_days($dt_current_date)->delta_days();
+#									if ($test_diff <= $days_acceptable_diff_for_testing_other_months) {
+#										print "Page ",$page->get_zooniverse_id(),". $consensus_date_friendly is probably $month_error_margin years out. Current date is $current_date->{friendly}\n";
+#										$consensus_annotation->set_note($dt_test_date->day()." ".$dt_test_date->month_abbr()." ".$dt_test_date->year());
+#										last;
+#									}
+#									$dt_test_date = $dt_consensus->clone();
+#									$dt_test_date->add( months => $month_error_margin );
+#									$test_diff = $dt_test_date->delta_days($dt_current_date)->delta_days();
+#									if ($test_diff <= $days_acceptable_diff_for_testing_other_months) {
+#										print "Page ",$page->get_zooniverse_id(),". $consensus_date_friendly is probably $month_error_margin years out. Current date is $current_date->{friendly}\n";
+#										$consensus_annotation->set_note($dt_test_date->day()." ".$dt_test_date->month_abbr()." ".$dt_test_date->year());
+#										last;
+#									}
+#								}
+							}
+						}
+						else {
+							# $consensus_date_friendly isn't later than our $current_year
+							# If it is more than $acceptable_date_jump different, test for the wrong year.
+							# test if the year is just wrong by trying the same date with different years
+							if ($diff_days > $acceptable_date_jump) {
+								my $year_length_in_days = 365;
+								for (my $year_error_margin = 1; $year_error_margin < 5; $year_error_margin++) {
+									my $test_min = $year_length_in_days * $year_error_margin - $acceptable_date_jump;
+									my $test_max = $year_length_in_days * $year_error_margin + $acceptable_date_jump;
+									if ($diff_days > $test_min && $diff_days < $test_max) {
+										print "Page ",$page->get_zooniverse_id(),". $consensus_date_friendly is probably $year_error_margin years out (most recent date was $current_date->{friendly})\n" if $debug > 2;
+										# then use DateTime math to add the appropriate number of years.
+										$dt_consensus->add( years => $year_error_margin );
+										$consensus_annotation->set_note($dt_consensus->day()." ".$dt_consensus->month_abbr()." ".$dt_consensus->year());
+										my $error = {
+											'type'		=> 'cluster_error; incorrect_year_fixed',
+											'detail'	=> 'the diaryDate value \''.$consensus_date_friendly.'\' for the cluster at '.$cluster->{median_centroid}[0].','.$cluster->{median_centroid}[1].' was fixed by changing the year to make it closer to the previously found date, \''.$current_date->{friendly}.'\'',
+										};
+										$self->data_error($error);
+										last;
+									}
+								}
+								my $diff_days = $dt_consensus->delta_days($dt_current_date)->delta_days();
+								if ($diff_days > $acceptable_date_jump) {
+									print "Page ",$page->get_zooniverse_id(),". Most recent date was $current_date->{friendly}. The next diaryDate cluster is $consensus_date_friendly. The date difference of $diff_days is greater than the one we determined to be acceptable ($acceptable_date_jump). What do we do here?\n" if $debug > 2;
+									undef;
+									next; # skip this cluster.
+								}
+							}
+							else {
+								# $consensus_date has jumped into the past, but not by as much as a year
+								undef;
+							}
+						}
+					}
+					
+					if (defined($page_date_lookup->{$date_y_coord})) {
+						# we already have a date for this page number and row.
+						if ($date_y_coord == 0 && ref($page_date_lookup->{$date_y_coord}) eq "HASH" && !defined($page_date_lookup->{$date_y_coord}{cluster})) {
+							# if this is row 0, we may have an annotation brought over from the previous page
+							# If we have an explicit annotation for row 0, we should replace the date that was 
+							# brought across from the previous page as it isn't needed.
+							# It should be easy to tell the date that was brought across as it doesn't
+							# relate to a cluster.
+							$page_date_lookup->{$date_y_coord}{friendly} = $consensus_date_friendly;
+							$page_date_lookup->{$date_y_coord}{sortable} = get_sortable_date($consensus_date_friendly);
+							$page_date_lookup->{$date_y_coord}{cluster} = $cluster;
+						}
+						elsif (ref($page_date_lookup->{$date_y_coord}) eq 'HASH' 
+							&& $page_date_lookup->{$date_y_coord}{friendly} ne $consensus_date_friendly) {
+							my $existing_sortable = $page_date_lookup->{$date_y_coord}{sortable};
+							my $new_sortable = get_sortable_date($consensus_date_friendly);
+							if ($existing_sortable > $new_sortable) {
+								$page_date_lookup->{$date_y_coord} = {
+									'friendly'	=> $consensus_date_friendly,
+									'sortable'	=> $new_sortable,
+									'cluster'	=> $cluster,
+								};
+							}
+						}
+						elsif (ref($page_date_lookup->{$date_y_coord}) eq 'ARRAY') {
+							# Original Logic: we have at least three dates for this row. Add the new date to the existing array for dealing with later
+							# Suggested new logic: Of the two dates, use the one that is closer to the recently used date (this may be a superfluous block)
+							my $date_already_recorded_for_this_row = 0;
+							foreach my $recorded_date (@{$page_date_lookup->{$date_y_coord}}) {
+								if ($recorded_date->{friendly} eq $consensus_annotation->get_string_value()) {
+									$date_already_recorded_for_this_row = 1;
+									last;
+								}
+							}
+							if (!$date_already_recorded_for_this_row) {
+								push @{$page_date_lookup->{$date_y_coord}}, {'friendly' => $consensus_annotation->get_string_value(), 'sortable' => get_sortable_date($consensus_annotation->get_string_value()), 'cluster' => $cluster};
+							}
+						}
+						else {
+							undef; # are these always a situation where the new annotation for the row matches the existing?
+						}
+					}
+					else {
+#						$page_date_lookup->{$date_y_coord}{friendly} = $selected_value;
+#						$page_date_lookup->{$date_y_coord}{sortable} = get_sortable_date($selected_value);
+						if (!defined($consensus_annotation->get_string_value())) {
+							undef;
+						}
+						$page_date_lookup->{$date_y_coord}{friendly} = $consensus_annotation->get_string_value();
+						$page_date_lookup->{$date_y_coord}{sortable} = get_sortable_date($page_date_lookup->{$date_y_coord}{friendly});
+						$page_date_lookup->{$date_y_coord}{cluster} = $cluster;
+						# ^ circular reference?
+						$current_date->{friendly} = $page_date_lookup->{$date_y_coord}{friendly};
+						$current_date->{sortable} = $page_date_lookup->{$date_y_coord}{sortable};
+						$dt_current_date = $date_parser->parse_datetime($current_date->{friendly});						
+					}
+				}
+				elsif ($cluster->count_annotations() < 2) {
+					# There was no consensus for this cluster, but with less than 2 annotations, that's understandable
+					next;
+				}
+				else {
+					# this diaryDate cluster has no consensus annotation (and not for lack of annotations)
+					undef;
+				}
+			} # end looping through clusters
+			
+#			my @rows = sort {$a <=> $b} keys %$page_date_lookup;
+#			# resolve any instances of multiple dates for a row here.
+#			foreach my $row (@rows) {
+#				if (ref($page_date_lookup->{$row}) eq 'ARRAY') {
+#					# of the multiple dates we now have for this row, confirm they are later
+#					# than the immediately preceeding row. If they are, select the earlier one
+#					# on the basis that this case is often caused by an entry like "15th-30th Sep"
+#					my $previous_row = _get_previous_date_row_number($page_date_lookup,$row,\@rows);
+#					my $qualified_dates = [];
+#					foreach my $user_contributed_date (@{$page_date_lookup->{$row}}) {
+#						if (ref($user_contributed_date) ne "HASH" || ref($page_date_lookup->{$previous_row}) ne "HASH") {
+#							undef;
+#							next;
+#						}
+#						if ($user_contributed_date->{sortable} > $page_date_lookup->{$previous_row}{sortable}) {
+#							push @$qualified_dates, $user_contributed_date;
+#						}
+#					}
+#					if (@$qualified_dates > 1) {
+#						# if more than one date meets the "later than the previous date" criteria
+#						my @user_contributed_dates = sort {$a->{sortable} <=> $b->{sortable}} @$qualified_dates;
+#						$page_date_lookup->{$row} = $user_contributed_dates[0];
+#					}
+#					elsif (@$qualified_dates == 1) {
+#						# only one of the user contributed dates is later than a previous date
+#						$page_date_lookup->{$row} = $qualified_dates->[0];
+#					}
+#					else {
+#						# none of the dates qualified - delete this $page_date_lookup row.
+#						delete $page_date_lookup->{$row};
+#						@rows = sort {$a <=> $b} keys %$page_date_lookup;
+#					}
+#				}
+#			}
+#			# repopulate the array of rows in case it has changed
+#			@rows = sort {$a <=> $b} keys %$page_date_lookup;
+#			# get the highest row-numbered date on the page, this will be the first date on the 
+#			# next page
+#			my $highest_row_number = $rows[-1];
+#			$current_date->{friendly} = $page_date_lookup->{$highest_row_number}{friendly};
+#			$current_date->{sortable} = $page_date_lookup->{$highest_row_number}{sortable};
+#			$dt_current_date = $date_parser->parse_datetime($current_date->{friendly});
+		}
+	}
+}
+
+sub create_date_lookup_old {
+	my ($self) = @_;
 	# TODO: This sub runs after the establish_consensus() subroutine, but some diaryDate clusters may not have reached consensus
 	# (I've seen examples where there is disagreement about the year for a page where the author neglected to include the year in
 	# the dates.)
@@ -304,6 +612,7 @@ sub create_date_lookup {
 				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
 					# There was consensus for the date at this cluster
 					my $date_y_coord = ($cluster->get_median_centroid())->[1];
+
 					if (ref($consensus_annotation->get_note()) eq 'ARRAY') {
 						# we have multiple possible dates for this cluster. Check the difference
 						# from the last known date, and use the closest.
@@ -339,6 +648,7 @@ sub create_date_lookup {
 							next; # skip this cluster
 						}
 					}
+					
 					if (defined($page_date_lookup->{$date_y_coord})) {
 						# we already have a date for this page number and row.
 						if ($date_y_coord == 0 && ref($page_date_lookup->{$date_y_coord}) eq "HASH" && !defined($page_date_lookup->{$date_y_coord}{cluster})) {
@@ -395,7 +705,8 @@ sub create_date_lookup {
 					# this diaryDate cluster has no consensus annotation (and not for lack of annotations)
 					undef;
 				}
-			}
+			} # end looping through clusters
+			
 			my @rows = sort {$a <=> $b} keys %$page_date_lookup;
 			# resolve any instances of multiple dates for a row here.
 			foreach my $row (@rows) {
