@@ -32,13 +32,13 @@ $owd->set_confirmed_db($confirmed_db);
 my $total_raw_tag_counts;
 my $diary_count = 0;
 
-my %already_processed;
-my @file_list = glob("output/*.tsv");
-foreach my $file (@file_list) {
-	if ($file =~ /(GWD.+)\.tsv$/i) {
-		$already_processed{$1} = 1;
-	}
-}
+#my %already_processed;
+#my @file_list = glob("output/*.tsv");
+#foreach my $file (@file_list) {
+#	if ($file =~ /(GWD.+)\.tsv$/i) {
+#		$already_processed{$1} = 1;
+#	}
+#}
 my @diary_ids;
 if (@ARGV) {
 	foreach my $diary_id (@ARGV) {
@@ -58,10 +58,10 @@ sub diary_tasks {
 	my ($diary) = @_;
 	$diary_count++;
 	my $diary_id = $diary->get_zooniverse_id();
-	if ($already_processed{$diary_id}) {
-		print "Skipping $diary_id\n";
-		return;
-	}
+#	if ($already_processed{$diary_id}) {
+#		print "Skipping $diary_id\n";
+#		return;
+#	}
 	print "Processing diary $diary_id\n";
 	# clear down the log db for this diary ID
 	$owd->get_logging_db()->get_collection('error')->remove({"diary.group_id" => "$diary_id"});
