@@ -84,6 +84,18 @@ sub diary_tasks {
 		#$diary->create_date_lookup();
 		print "Creating place lookup\n";
 		$diary->create_place_lookup();
+#		my $chronological_places = $diary->get_chronological_places();
+#		my $place_mentions = 0;
+#		foreach my $time_place (@$chronological_places) {
+#			$place_mentions++;
+#			#my $result = $geo->search(q => $time_place->{place}{name}, country => "GB", country => "BE", country => "FR");
+#			my $place_match_list = $geo->search(q => $time_place->{place}{name}, country => ["GB","BE","FR"]);
+#			my $place_matches_by_type;
+#			foreach my $place_match (@$place_match_list) {
+#				push @{$place_matches_by_type->{ $place_match->{fcode} }}, $place_match;
+#			}
+#			undef;
+#		}
 		$diary->resolve_uncertainty();
 		#$diary->fix_suspect_diaryDates();
 #		open my $text_report, ">", "output/$diary_id-text.txt";

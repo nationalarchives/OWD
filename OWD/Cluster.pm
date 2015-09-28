@@ -39,7 +39,7 @@ my $core_consensus_fields = {
 	'diaryDate'	=> TIE_FOR_MOST_POPULAR_VALUE,
 };
 
-my $diaryDate_y_axis_skew = -2;
+my $diaryDate_y_axis_skew = -2; # keep this in sync with the similar value in Page.pm
 
 sub new {
 	my ($class, $page, $annotation) = @_;
@@ -159,6 +159,16 @@ sub get_first_annotation {
 sub distance {
 	my ($coord1,$coord2) = @_;
 	return sqrt( ( ($coord1->[0] - $coord2->[0])**2 ) + ( ($coord1->[1] - $coord2->[1])**2) );
+}
+
+sub has_contributor {
+	my ($self,$contributor) = @_;
+	foreach my $annotation (@{$self->{_annotations}}) {
+		if ($annotation->get_classification()->get_classification_user() eq $contributor) {
+			return 1;
+		}
+	}
+	return 0;
 }
 
 sub establish_consensus {

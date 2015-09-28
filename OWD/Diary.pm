@@ -963,6 +963,7 @@ sub print_tsv_format2_report {
 	my $title 		= $self->{_group_data}{name};
 	my $diary_id	= $self->get_zooniverse_id();
 	my $tags_by_date;
+	my $all_tags_by_date;
 	foreach my $page (@{$self->{_pages}}) {
 		my $page_num		= $page->get_page_num();
 		my $doctype			= $page->get_doctype(); 
@@ -973,7 +974,7 @@ sub print_tsv_format2_report {
 		foreach my $type (keys %{$page->{_clusters}}) {
 			next if $type eq 'diaryDate' or $type eq 'doctype'; # we've used these to create our date_lookup function already
 			foreach my $cluster (@{$page->{_clusters}{$type}}) {
-				next if ($cluster->get_type() ne 'activity' && $cluster->get_type() ne 'domestic'); 
+				next if ($cluster->get_type() ne 'activity' && $cluster->get_type() ne 'domestic');
 				my $date = get_date_for($page_num, $cluster->{median_centroid}[1]);
 				my $place = get_place_for($page_num, $cluster->{median_centroid}[1]);
 				$tags_by_date->{$date->{sortable}}{places}{$place}++;
@@ -986,7 +987,15 @@ sub print_tsv_format2_report {
 				else {
 					undef;
 				}
-				
+				foreach my $annotation (@{$cluster->{_annotations}}) {
+					my $tag_date = get_date_for($page_num, $annotation->{_annotation_data}{coords}[1]);
+					my $tag_place = get_place_for($page_num, $annotation->{_annotation_data}{coords}[1]);
+					my $tag = $annotation->get_type().":".$annotation->get_note();
+					$all_tags_by_date->{$tag_date->{sortable}}{places}{$place}++;
+					$all_tags_by_date->{$tag_date->{sortable}}{date} = $date->{friendly};
+					$all_tags_by_date->{$tag_date->{sortable}}{pages}{$page_num} = {'doctype' => $doctype, 'zooniverse_id' => $zooniverse_id, };
+					$all_tags_by_date->{$tag_date->{sortable}}{tags}{$tag}++;
+				}
 				undef;
 			}
 		}
@@ -1041,11 +1050,12 @@ sub print_tsv_format2_report {
 			push @page_ids, $tags_by_date->{$date}{pages}{$page_num}{zooniverse_id};
 		}
 		my $friendly_date = $tags_by_date->{$date}{date};
-		print $ofh "$title\t$friendly_date\t@pages\t@page_ids\t";
-		my @places = keys %{$tags_by_date->{$date}{places}};
-		if (@places > 3) {
-			undef;
+		if (!defined $friendly_date) {
+			print "$friendly_date is undefined\n";
+			print Dumper $tags_by_date->{$date};
 		}
+		print $ofh "$title\t$friendly_date\t@pages\t@page_ids\t";
+		my @places = sort keys %{$tags_by_date->{$date}{places}};
 		for (my $i=0; $i<3; $i++) {
 			if (defined $places[$i]) {
 				print $ofh "$places[$i]\t";
@@ -1072,7 +1082,58 @@ sub print_tsv_format2_report {
 		}
 		print $ofh "\n";
 	}
+	close $ofh;
+	undef $tags_by_date;
+	open $ofh, ">", "output_all-tags/$diary_id.tsv";
+	print $ofh "#Unit\tDate\tPageNum\tPageID\tPlace1\tPlace2\tPlace3\t";
+	print $ofh join("\t",@activities),"\t";
+	print $ofh join("\t",@domestic);
+	print $ofh "\n";
+	foreach my $date (sort keys %$all_tags_by_date) {
+		my @pages = sort {$a <=> $b} keys %{$all_tags_by_date->{$date}{pages}};
+		my @page_ids = ();
+		foreach my $page_num (@pages) {
+			push @page_ids, $all_tags_by_date->{$date}{pages}{$page_num}{zooniverse_id};
+		}
+		my $friendly_date = $all_tags_by_date->{$date}{date};
+		if (!defined $friendly_date) {
+			print "$friendly_date is undefined\n";
+			print Dumper $tags_by_date;
+			<STDIN>;
+		}
+		print $ofh "$title\t$friendly_date\t@pages\t@page_ids\t";
+		my @places = keys %{$all_tags_by_date->{$date}{places}};
+		if (@places > 3) {
+			undef;
+		}
+		for (my $i=0; $i<3; $i++) {
+			if (defined $places[$i]) {
+				print $ofh "$places[$i]\t";
+			}
+			else {
+				print $ofh "\t";
+			}
+		}
+		foreach my $tag_type (@activities) {
+			if (defined($all_tags_by_date->{$date}{tags}{$tag_type})) {
+				print $ofh "$all_tags_by_date->{$date}{tags}{$tag_type}\t";
+			}
+			else {
+				print $ofh "\t";
+			}
+		}
+		foreach my $tag_type (@domestic) {
+			if (defined($all_tags_by_date->{$date}{tags}{$tag_type})) {
+				print $ofh "$all_tags_by_date->{$date}{tags}{$tag_type}\t";
+			}
+			else {
+				print $ofh "\t";
+			}
+		}
+		print $ofh "\n";
+	}
 	undef;
+	close $ofh;
 #	my $tags_by_date;
 #	my $current_date;
 #	foreach my $page (sort {$a <=> $b} keys %$chrono_clusters) {

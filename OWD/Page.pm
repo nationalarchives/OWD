@@ -8,7 +8,9 @@ use Text::LevenshteinXS;
 use Carp;
 use DateTime::Format::Natural;
 
+$Data::Dumper::Maxdepth = 4;
 my $debug = 1;
+my $diaryDate_y_axis_skew = -2; # keep this in sync with the similar value in Cluster.pm
 
 sub new {
 	my ($class, $_diary, $_subject) = @_;
@@ -248,7 +250,7 @@ sub cluster_tags {
 			$cluster->add_annotation($annotations_by_type_and_user->{doctype}{$user}[0]);
 		}
 	}
-	foreach my $type (keys %$annotations_by_type_and_user) {
+	foreach my $type (sort keys %$annotations_by_type_and_user) {
 		next if $type eq 'doctype';
 		# for this tag type, who has the most tags? Use their tags to create the skeleton cluster layout
 		my $user_annotations_by_type_popularity = _num_tags_of_type($annotations_by_type_and_user->{$type});
@@ -258,7 +260,6 @@ sub cluster_tags {
 				if ($first_user_for_this_type) {
 					# This is the top user for the tag type, so create a new cluster for each of their tags
 					foreach my $annotation (@{$user_annotations_by_type_popularity->{$num_annotations}{$username}}) {
-						#push @{$self->{_clusters}{$type}}, [$annotation];
 						push @{$self->{_clusters}{$type}}, OWD::Cluster->new($self,$annotation);
 					}
 					$first_user_for_this_type = 0;
@@ -295,11 +296,22 @@ sub _match_annotation_against_existing {
 	# for each cluster for this type so far, try matching new tag to it
 	# find the most similar nearby tag. If there aren't any, start a new cluster.
 	my $type = $new_annotation->get_type();
+	my $new_annotation_contributor = $new_annotation->{_classification}->get_classification_user();
 	my $annotation_distance_from_cluster;
 	my $annotation_similarity_to_cluster;
 	for (my $cluster_num = 0; $cluster_num <  @{$self->{_clusters}{$type}}; $cluster_num++) {
+		# first check that the contributor of $new_annotation doesn't already have an annotation in
+		# the cluster we are checking
+		if ($self->{_clusters}{$type}[$cluster_num]->has_contributor($new_annotation_contributor)) {
+			next;
+		}
 		# check for distance (x/y)
-		my $distance = acceptable_distance($type,$new_annotation->get_coordinates(),$self->{_clusters}{$type}[$cluster_num]->get_centroid());
+		# If this is a diaryDate field, we are deliberately skewing the y axis value as it provides a more accurate result
+		my @coords_to_test = @{$new_annotation->get_coordinates()};
+		if ($type eq 'diaryDate') {
+			$coords_to_test[1] += $diaryDate_y_axis_skew;
+		}
+		my $distance = acceptable_distance($type,\@coords_to_test,$self->{_clusters}{$type}[$cluster_num]->get_centroid());
 		if (defined($distance)) {
 			$annotation_distance_from_cluster->{$cluster_num} = $distance;
 		}
@@ -318,12 +330,33 @@ sub _match_annotation_against_existing {
 		# use the closest cluster unless the second closest cluster is identical to the new
 		# annotation, or is less than half the score of the nearest cluster.
 		my $selected_cluster;
-		my @close_clusters = sort {$annotation_distance_from_cluster->{$a} <=> $annotation_distance_from_cluster->{$a} } keys %$annotation_distance_from_cluster;
+		# @close_clusters is a list of clusters in order of distance
+		my @close_clusters = sort {$annotation_distance_from_cluster->{$a} <=> $annotation_distance_from_cluster->{$b} } keys %$annotation_distance_from_cluster;
+		# The above line can lead to inconsistent results if two or more clusters are exactly the same distance
+		# from the annotation we are trying to cluster, as these same-distance clusters can be returned in
+		# an arbitrary and changeable order. To resolve this, if the nearby clusters are exactly the same distance
+		# and exactly the same similarity score, return them in array index order (still arbitrary, but at least
+		# not changeable)
+		for (my $i = 0; $i < @close_clusters - 1; $i++) {
+			if ($annotation_distance_from_cluster->{ $close_clusters[$i] } == $annotation_distance_from_cluster->{ $close_clusters[$i+1] }) {
+				if ($annotation_similarity_to_cluster->{ $close_clusters[$i] }{score} == $annotation_similarity_to_cluster->{ $close_clusters[$i+1] }{score}) {
+					if ($close_clusters[$i] > $close_clusters[$i+1]) {
+						@close_clusters[$i,$i+1] = @close_clusters[$i+1,$i];
+						# TODO: if we re-ordered $i and $i+1 should we start the sort from 0 again?
+						# Otherwise three consecutive identical distance tags in reverse index order would not be
+						# sorted correctly
+					}
+				}
+			}
+		}
+		# if the nearest cluster has a similarity score of 0 (identical)
+		# OR if there is only one cluster nearby and the similarity score is less than half the length - 1
 		if ($annotation_similarity_to_cluster->{$close_clusters[0]}{score} == 0 
 			|| ( @close_clusters == 1 && $annotation_similarity_to_cluster->{$close_clusters[0]}{score} <= int($annotation_similarity_to_cluster->{$close_clusters[0]}{length} /2) - 1 ) ) {
 			$selected_cluster = $close_clusters[0];
 		}
 		elsif (@close_clusters > 1) {
+			# if there is more than one nearby cluster, find the cluster with the lowest similarty score (ie most similar)
 			my $best_cluster_so_far;
 			foreach my $cluster (@close_clusters) {
 				if (!defined($best_cluster_so_far->{score}) || $best_cluster_so_far->{score} > $annotation_similarity_to_cluster->{$cluster}{score}) {
@@ -333,11 +366,11 @@ sub _match_annotation_against_existing {
 			$selected_cluster = $best_cluster_so_far->{number};
 		}
 		if (defined $selected_cluster) {
-			# if we get to here, though there were nearby clusters, they were too different to be able
-			# to add $new_annotation to the cluster. In this case we should create a new cluster.
 			$self->{_clusters}{$type}[$selected_cluster]->add_annotation($new_annotation);
 		}
 		else {
+			# if we get to here, though there were nearby clusters, they were too different to be able
+			# to add $new_annotation to the cluster. In this case we should create a new cluster.
 			push @{$self->{_clusters}{$type}}, OWD::Cluster->new($self,$new_annotation);
 		}
 	}
@@ -347,10 +380,36 @@ sub _match_annotation_against_existing {
 	}
 }
 
+sub dump_clusters {
+	my ($self,$type_to_dump) = @_;
+	foreach my $cluster_type (keys %$self->{_clusters}) {
+		next if (defined $type_to_dump && $cluster_type ne $type_to_dump);
+		print "$cluster_type\n";
+		my $cluster_num = 0;
+		foreach my $cluster (@{$self->{_clusters}{$cluster_type}}) {
+			$cluster_num++;
+			print "  Cluster #$cluster_num\n";
+			print "    Num annotations: ", $cluster->count_annotations(), "\n";
+			my $median_centroid = $cluster->get_median_centroid();
+			print "    Median centroid: $median_centroid->[0],$median_centroid->[1]\n";
+			print "    Annotations:\n";
+			my $annotation_num = 0;
+			foreach my $annotation (@{$cluster->{_annotations}}) {
+				$annotation_num++;
+				print "      ($annotation_num) $annotation->{_annotation_data}{id}\n";
+			}
+		} 
+	}
+}
+
 sub acceptable_distance {
 	my ($type, $coord1, $coord2) = @_;
 	# acceptable difference is a combination of a maximum x distance, a maximum y distance, and a 
 	# maximum total distance (because there needs to be more tolerance on the x axis than the y axis)
+	# TODO: Sometimes an entity is split over two lines in the diary (eg on page AWD000004x, the 22nd
+	# August "march to/ Quievrain" is tagged at ~(67,31) by three users, but at (29,34) by one other)
+	# Find some way of testing whether tags cluster better if we subtract x38 and add y3, but only 
+	# for tags at the left edge or right edge of the page!
 	my $x_max;
 	my $y_max;
 	my $dist_max;
@@ -371,7 +430,7 @@ sub acceptable_distance {
 	}
 	elsif ($type eq 'activity') {
 		$x_max = 30;
-		$y_max = 4;
+		$y_max = 5;
 		$dist_max = 30;
 	}
 	else {
@@ -419,6 +478,9 @@ sub similarity {
 		$score = Text::LevenshteinXS::distance($cluster_annotation->get_field('place'),$new_annotation->get_field('place'));
 		$length = length($cluster_annotation->get_field('place'));
 	}
+	# TODO: Add a new case for activity types - currently scoring them 0 (identical) regardless of 
+	# value is probably causing problems. Do an analysis to assign meaningful scores depending on tyoe though
+	# eg. enemy_activity, fire and attack are used interchangeably (incorrectly probably, but still)
 	else {
 		my $type = $new_annotation->get_type();
 		if ($type ne 'diaryDate' && $type ne 'time' && $type ne 'place' && $type ne 'activity' && $type ne 'domestic' && $type ne 'weather' && $type eq 'weather') {
