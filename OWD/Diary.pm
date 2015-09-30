@@ -197,28 +197,31 @@ sub cluster_tags {
 
 sub establish_consensus {
 	my ($self) = @_;
+
+	# for pages that have no consensus on diaryDate clusters, it can be impossible to verify the date on the page in isolation
+	# but if we keep a running tally of the dates across the whole diary, the correct date can often be implied/inferred from the
+	# consensus dates on surrounding pages.
 	$self->{date_range} = {};
+
 	if (!defined $self->{_pages}) {
 		$self->load_pages();
 	}
+
 	foreach my $page (@{$self->{_pages}}) {
 		$page->establish_consensus();
-		# for pages that have no consensus on diaryDate clusters, it can be impossible to verify the date on the page in isolation
-		# but if we keep a running tally of the dates across the whole diary, the correct date can often be implied/inferred from the
-		# consensus dates on surrounding pages.
 	}
-#	$self->report_date_ranges_per_page();
+	foreach my $page (@{$self->{_pages}}) {
+		$self->{date_range}{$page->get_page_num()} = $page->get_date_range();
+	}
+#	foreach my $page (@{$self->{_pages}}) {
+#		$page->resolve_diaryDate_disputes();
+#	}
+	#$self->report_date_ranges_per_page();
 	# After doing a first pass on establishing consensus, we can reprocess the disputed clusters with the consensus clusters elsewhere.
 	# In particular, look for no-consensus diaryDate fields and no-consensus person fields.
 	# TODO: get the range of consensus diaryDates per page, then use this to inform the decision on disputed dates.
 	# Create subs for OWD::Page->get_consensus_date_range()
 	$self->create_date_lookup();
-#	foreach my $page (@{$self->{_pages}}) {
-#		$self->{date_range}{$page->get_page_num()} = $page->get_date_range();
-#	}
-#	foreach my $page (@{$self->{_pages}}) {
-#		$page->resolve_diaryDate_disputes();
-#	}
 	undef;	
 }
 
@@ -240,16 +243,17 @@ sub report_date_ranges_per_page {
 	my $base_date = $date_parser->parse_datetime("1 Jan 1914");
 	my $filename = $self->get_zooniverse_id()."-date_ranges.tsv";
 	open my $ofh, ">",  "output/$filename";
-	print $ofh "Page\tmin\tmax\n";
+	print $ofh "Page\tdate\n";
 	foreach my $page_num (sort {$a <=> $b} keys %{$self->{date_range}}) {
 		next if (!defined $self->{date_range}{$page_num}{min});
-		print $ofh "$page_num\t";
-		foreach (@{$self->{date_range}{$page_num}}{'min','max'}) {
-			my $dur = $base_date->delta_days($_);
+		foreach ('min','max') {
+			my $date = $self->{date_range}{$page_num}{$_};
+			print $ofh "$page_num";
+			if ($_ eq 'min') { print $ofh "s\t" } else {print $ofh "e\t"; }
+			my $dur = $base_date->delta_days($date);
 			my $days = $dur->in_units('days');
-			print $ofh "$days\t";
+			print $ofh "$days\n";
 		}
-		print $ofh "\n";
 	}
 	close $ofh;
 }
@@ -774,7 +778,7 @@ sub get_surrounding_dates_for {
 
 sub create_place_lookup {
 	my ($self) = @_;
-	my $current_place = "";
+	my $current_place = ""; # $current_place keeps track of the most recently tagged placename from the previous page
 
 	if (!defined $self->{_pages}) {
 		$self->load_pages();
@@ -786,6 +790,7 @@ sub create_place_lookup {
 		my $page_place_lookup = $place_lookup->{$page_num}; # the section of the $place_lookup hash referencing the current page
 		$page_place_lookup->{0} = $current_place;
 		if (defined $page->{_clusters}{place}) {
+			# There are places tagged on this page - iterate through them in y-axis order
 			foreach my $cluster (sort { $a->{median_centroid}[1] <=> $b->{median_centroid}[1] } @{$page->{_clusters}{place}}) {
 				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
 					my $place_y_coord = $cluster->{median_centroid}[1];
@@ -809,11 +814,12 @@ sub create_place_lookup {
 						elsif (ref($page_place_lookup->{$place_y_coord}) eq 'ARRAY') {
 							# we have at least three dates for this row.
 							# Add the new date to the existing array for dealing with later
-							undef
+							undef;
 #							push @{$page_place_lookup->{$place_y_coord}}, {'friendly' => $consensus_annotation->get_string_value(), 'sortable' => get_sortable_date($consensus_annotation->get_string_value()), 'cluster' => $cluster};
 						}
 					}
 					else {
+						# TODO: Link the actual Consensus Annotation here instead of a string.
 						$page_place_lookup->{$place_y_coord} = $consensus_annotation->get_string_value();
 					}
 				}

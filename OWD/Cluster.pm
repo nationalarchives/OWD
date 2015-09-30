@@ -176,9 +176,9 @@ sub establish_consensus {
 
 	# Start building a consensus annotation structure to be blessed as a ConsensusAnnotation later
 	my $consensus_annotation;
-	$consensus_annotation->{type} = $self->{_annotations}[0]{_annotation_data}{type};
+	$consensus_annotation->{type} = $self->{_annotations}[0]->get_type();
 	$consensus_annotation->{coords} = $self->{median_centroid};
-	my $value_counts = $self->_get_annotation_value_scores();
+	my $value_counts = $self->_get_annotation_value_scores(); # count up any note values
 
 	my $enough_consensus = 1; # we'll unset this if an annotation fails consensus requirements
 	my $status_of_field;
