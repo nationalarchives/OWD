@@ -650,7 +650,16 @@ sub resolve_uncertainty {
 			}
 			else {
 				# There is no consensus annotation yet
-				undef;
+				if ($cluster->count_annotations() == 1) {
+					# We can't compute or infer consensus from a single user annotation
+				}
+				else {
+					undef;
+					# possible methods to fix disputes
+					# - for places, if one place is a substring of the other, try both against Geonames
+					# 	and if they are close to each other, use 1) the longer name 2) the one with the best category
+					#   eg "La Voue le Pretre" vs "Pretre" and "Jovey le Chatel" vs "Chatel"
+				}
 			}
 		}
 	}

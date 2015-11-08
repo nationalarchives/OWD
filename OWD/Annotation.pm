@@ -208,7 +208,46 @@ sub get_string_value {
 	elsif ($self->{_annotation_data}{type} eq 'person') {
 		foreach my $key (keys %{$self->{_annotation_data}{standardised_note}}) {
 			if (ref($self->{_annotation_data}{standardised_note}{$key}) eq 'ARRAY') {
-				undef;
+				if ($key eq 'rank') {
+					my $rank_preference_order = ['Second Lieutenant','Lieutenant','Quarter Master Sergeant','Company Quarter Master Sergeant','Bombardier','','other'];
+					my $preferred_rank_found = 0;
+					foreach my $preferred_rank (@$rank_preference_order) {
+						foreach my $disputed_rank (@{$self->{_annotation_data}{standardised_note}{rank}}) {
+							if ($preferred_rank eq $disputed_rank) {
+								$self->{_annotation_data}{standardised_note}{rank} = $preferred_rank;
+								$preferred_rank_found = 1;
+								last;
+							}
+						}
+						last if $preferred_rank_found;
+					}
+					if (!$preferred_rank_found) {
+						my $rank_string;
+						foreach my $disputed_rank (@{$self->{_annotation_data}{standardised_note}{rank}}) {
+							$rank_string .= $disputed_rank."|";
+						}
+						$rank_string =~ s/\|$//;
+						$self->{_annotation_data}{standardised_note}{rank} = $rank_string;
+					}
+				}
+				elsif ($key eq 'reason') {
+					my $reason_preference_order = ['departed_posted','joined','returned_hospital','returned_leave','promotion','casualty_kia','other','author'];
+					my $preferred_reason_found = 0;
+					foreach my $preferred_reason (@$reason_preference_order) {
+						foreach my $disputed_reason (@{$self->{_annotation_data}{standardised_note}{reason}}) {
+							if ($preferred_reason eq $disputed_reason) {
+								$self->{_annotation_data}{standardised_note}{reason} = $preferred_reason;
+								$preferred_reason_found = 1;
+								last;
+							}
+						}
+						last if $preferred_reason_found;
+					}
+				}
+				else {
+					$self->{_annotation_data}{standardised_note}{$key} = '';
+					undef;
+				}
 			}
 		}
 		if ($self->{_annotation_data}{standardised_note}{rank} ne '') {

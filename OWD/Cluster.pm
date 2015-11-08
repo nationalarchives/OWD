@@ -282,6 +282,7 @@ sub establish_consensus {
 						$consensus_annotation->{standardised_note}{$key} = $values[0];
 					}
 					else {
+						# if there is a tie for the most popular value, we record each of the tied values for resolution later.
 						$status_of_field->{$key} = TIE_FOR_MOST_POPULAR_VALUE;
 						my $tied_score = $value_counts->{$key}{$values[0]};
 						foreach my $value (@values) {
@@ -405,6 +406,11 @@ sub get_consensus_annotation {
 	else {
 		return undef;
 	}
+}
+
+sub get_page {
+	my ($self) = @_;
+	return $self->{_page};
 }
 
 sub count_annotations {

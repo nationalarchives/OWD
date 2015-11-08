@@ -80,32 +80,26 @@ sub diary_tasks {
 		$diary->cluster_tags();
 		print "Establishing consensus\n";
 		$diary->establish_consensus();
-		#print "Creating date lookup\n";
-		#$diary->create_date_lookup();
+
+		# create_place_lookup populates a hash keyed by page and y-coord listing the consensus places
+		# Each row will have one or more place ConsensusAnnotations
 		print "Creating place lookup\n";
 		$diary->create_place_lookup();
-#		my $chronological_places = $diary->get_chronological_places();
-#		my $place_mentions = 0;
-#		foreach my $time_place (@$chronological_places) {
-#			$place_mentions++;
-#			#my $result = $geo->search(q => $time_place->{place}{name}, country => "GB", country => "BE", country => "FR");
-#			my $place_match_list = $geo->search(q => $time_place->{place}{name}, country => ["GB","BE","FR"]);
-#			my $place_matches_by_type;
-#			foreach my $place_match (@$place_match_list) {
-#				push @{$place_matches_by_type->{ $place_match->{fcode} }}, $place_match;
-#			}
-#			undef;
-#		}
-		$diary->resolve_uncertainty();
+		#$diary->resolve_uncertainty();
 		#$diary->fix_suspect_diaryDates();
 #		open my $text_report, ">", "output/$diary_id-text.txt";
 #		$diary->print_text_report($text_report);
 #		close $text_report;
+#		open my $place_person_report, ">", "output/$diary_id-place-person.tsv";
+#		$diary->print_place_person_report($place_person_report);
+#		close $place_person_report;
+		open my $place_report, ">", "output/$diary_id-place.tsv";
+		$diary->print_place_report($place_report);
+		close $place_report;
 #		open my $tsv_report, ">", "output/$diary_id.tsv";
 #		$diary->print_tsv_report($tsv_report);
 #		close $tsv_report;
-		$diary->print_tsv_format2_report();
-#		close $tsv_report;
+		#$diary->print_activities_report();
 
 		$diary->publish_to_db();
 		my $tag_types = {};
