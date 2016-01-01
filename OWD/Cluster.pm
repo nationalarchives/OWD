@@ -36,7 +36,7 @@ my $core_consensus_fields = {
 	'unit'		=> {
 						'name'		=> LONE_USER_SUBMITTED,
 	},
-	'diaryDate'	=> TIE_FOR_MOST_POPULAR_VALUE,
+	'diaryDate'	=> PLURALITY_CONSENSUS,
 };
 
 my $diaryDate_y_axis_skew = -2; # keep this in sync with the similar value in Page.pm
@@ -194,7 +194,11 @@ sub establish_consensus {
 	
 	# Find the most popular value for the note (or for each key of the note, if a more complex annotation)
 	if ($note_type eq 'SCALAR') {
+		# Order the values, most popular first
 		my @values = reverse sort { $value_counts->{$a} <=> $value_counts->{$b} } keys %$value_counts;
+		if (@values > 1 && $values[0] eq '') {
+			undef;
+		}
 		if ($value_counts->{$values[0]} > 1) {
 			# more than one user agreed on a value, check if there was unanimity on the value 
 			if (defined($values[1])) {
@@ -238,12 +242,13 @@ sub establish_consensus {
 			else {
 				# lonely cluster
 				$status_of_field = LONE_USER_SUBMITTED;
-				$error = {
-					'type'				=> 'cluster_error; lonely_cluster',
-					'standardised_note'	=> $self->{_annotations}[0]->get_string_value(),
-					'annotation_id'		=> $self->{_annotations}[0]->get_id(),
-					'detail'			=> 'cluster consists of a single annotation only, not enough for a consensus',
-				};
+#				The error state below is already logged at the cluster_tags() stage
+#				$error = {
+#					'type'				=> 'cluster_error; lonely_cluster',
+#					'standardised_note'	=> $self->{_annotations}[0]->get_string_value(),
+#					'annotation_id'		=> $self->{_annotations}[0]->get_id(),
+#					'detail'			=> 'cluster consists of a single annotation only, not enough for a consensus',
+#				};
 			}
 		}
 		if (defined($core_consensus_fields->{ $type })) {
@@ -273,6 +278,11 @@ sub establish_consensus {
 		my $is_lonely_cluster = 0;
 		foreach my $key (keys %$value_counts) {
 			my @values = reverse sort { $value_counts->{$key}{$a} <=> $value_counts->{$key}{$b} } keys %{$value_counts->{$key}};
+			if (@values > 1 && $values[0] eq '') {
+				undef;
+				shift @values;
+				delete $value_counts->{$key}{''};
+			}
 			if ($value_counts->{$key}{$values[0]} > 1) {
 				# not a lonely cluster, check if there's a tie
 				if (defined($values[1])) {
@@ -288,9 +298,10 @@ sub establish_consensus {
 						foreach my $value (@values) {
 							push @{$consensus_annotation->{standardised_note}{$key}}, $value if $value_counts->{$key}{$value} == $tied_score;
 						}
+						my $value_string = join "|",@{$consensus_annotation->{standardised_note}{$key}};
 						push @$error, {
 							'type'		=> 'cluster_error; value_tie',
-							'detail'	=> 'field '.$key.' in the cluster was a tie of two or more different values',
+							'detail'	=> 'field '.$key.' in the cluster was a tie of two or more different values ($value_string)',
 						};
 					}
 				}
@@ -306,9 +317,10 @@ sub establish_consensus {
 					foreach my $value (@values) {
 						push @{$consensus_annotation->{standardised_note}{$key}}, $value if $value_counts->{$key}{$value} == $tied_score;
 					}
+					my $value_string = join "|",@{$consensus_annotation->{standardised_note}{$key}};
 					push @$error, {
 						'type'		=> 'cluster_error; value_tie',
-						'detail'	=> 'field '.$key.' in the cluster was a tie of two or more different values',
+						'detail'	=> 'field '.$key.' in the cluster was a tie of two or more different values ($value_string)',
 					};
 				}
 				else {
@@ -316,12 +328,13 @@ sub establish_consensus {
 					$status_of_field->{$key} = LONE_USER_SUBMITTED;
 				}
 			}
-			push @$error, {
-				'type'		=> 'cluster_error; lonely_cluster',
-				'standardised_note'	=> $self->{_annotations}[0]->get_string_value(),
-				'annotation_id'		=> $self->{_annotations}[0]->get_id(),
-				'detail'	=> 'cluster consists of a single annotation only, not enough for a consensus',
-			} if $is_lonely_cluster;
+#			The following error is already logged at the cluster_tags stage
+#			push @$error, {
+#				'type'		=> 'cluster_error; lonely_cluster',
+#				'standardised_note'	=> $self->{_annotations}[0]->get_string_value(),
+#				'annotation_id'		=> $self->{_annotations}[0]->get_id(),
+#				'detail'	=> 'cluster consists of a single annotation only, not enough for a consensus',
+#			} if $is_lonely_cluster;
 		}
 		# Check here if there was enough consensus to make a meaningful consensus annotation
 		if (defined($core_consensus_fields->{ $type })) {
@@ -368,7 +381,7 @@ sub establish_consensus {
 				$self->data_error($error);
 			}
 		}
-		else {
+		elsif (defined $error) {
 			$self->data_error($error);
 		}
 	}
