@@ -5,6 +5,8 @@ use OWD::Page;
 use Carp;
 use Data::Dumper;
 use DateTime::Format::Natural;
+use Text::LevenshteinXS;
+use List::Util;
 
 my $debug = 1;
 my $date_lookup = {};
@@ -848,10 +850,52 @@ sub get_place_for {
 	return $place_lookup->{$page}{$closest_place_row_above};
 }
 
+sub rationalise_person_names {
+	my ($self) = @_;
+	# To look for likely misspellings, analyse all the names that came out of the diary and look for similar names
+	# First create a data structure keyed by last name
+	my $people;
+	foreach my $page (@{$self->{_pages}}) {
+		my $clusters = $page->get_clusters(); #TODO - ensure this array gets deleted
+		next if (!defined $clusters->{person});
+		foreach my $person_cluster (@{$clusters->{person}}) {
+			if (my $consensus_annotation = $person_cluster->get_consensus_annotation()) {
+				my $standardised_note = $consensus_annotation->{_annotation_data}{standardised_note};
+				if (!ref($standardised_note->{surname}) && $standardised_note->{surname} eq '') {
+					undef;
+					next;
+				}
+				push @{$people->{by_surname}{$standardised_note->{surname}}{$standardised_note->{rank}}{$standardised_note->{first}}}, $person_cluster;
+			}
+			else {
+				next if $person_cluster->count_annotations() < 2;
+				push @{$people->{surname_unsure}}, $person_cluster;
+			}
+		}
+		undef;
+	}
+	# now iterate through the surnames looking for low Levenshtein scores (likely misspellings)
+	my @surnames = keys %{$people->{by_surname}};
+	my $match_count = 0;
+	for (my $i = 0; $i<@surnames; $i++) {
+		for (my $j=$i+1;$j<@surnames;$j++) {
+			my $score = Text::LevenshteinXS::distance($surnames[$i],$surnames[$j]);
+			my $strings_max_length = List::Util::max(length($surnames[$i]),length($surnames[$j]));
+			my $max_score = int($strings_max_length/2)-1;
+			if ($score <= $max_score) {
+				$match_count++;
+				print "$match_count: $surnames[$i] <=> $surnames[$j]\n";
+				
+			}
+		}
+	}
+	undef;
+}
+
 sub print_text_report {
 	my ($self, $fh) = @_;
-	print $fh $self->{_group_data}{zooniverse_id}." ".$self->{_group_data}{metadata}{source}."\n".$self->{_group_data}{name}."\n";
-	print $fh $self->{_group_data}{stats}{total}." pages\n\n";
+	print $fh $self->{_group_data}{zooniverse_id}." ".$self->{_group_data}{metadata}{source}."\r\n".$self->{_group_data}{name}."\r\n";
+	print $fh $self->{_group_data}{stats}{total}." pages\r\n\r\n";
 	foreach my $page (@{$self->{_pages}}) {
 		my $doctype		= $page->get_doctype();
 		if (!defined $doctype) {
@@ -859,17 +903,17 @@ sub print_text_report {
 		}
 		my $page_num	= $page->get_page_num();
 		if ($doctype eq 'cover' || $doctype eq 'blank') {
-			print $fh "Page $page_num (type $doctype)\n";
+			print $fh "Page $page_num (type $doctype)\r\n";
 		}
 		else {
-			print $fh "Page $page_num (type $doctype) http://wd3.herokuapp.com/pages/",$page->get_zooniverse_id,'  ','-'x 10,"\n";
+			print $fh "Page $page_num (type $doctype) http://wd3.herokuapp.com/pages/",$page->get_zooniverse_id,'  ','-'x 10,"\r\n";
 			if (defined (my $hashtags = $page->get_hashtags())) {
 				if (keys %$hashtags > 0) {
 					print $fh "  Hashtags: ";
 					foreach my $hashtag (reverse sort {$hashtags->{$a} <=> $hashtags->{$b}} keys %$hashtags) {
 						print $fh "$hashtag ";
 					}
-					print $fh "\n";
+					print $fh "\r\n";
 				}
 			}
 			# do we print the consensus data purely chronologically, or chronologically then categorised?
@@ -896,7 +940,7 @@ sub print_text_report {
 					if (!defined($date_boundaries->{$date->{friendly}})) {
 						$date_boundaries->{$date->{friendly}} = 0;
 					}
-					print $fh "  $date->{friendly} ",$date_boundaries->{$date->{friendly}},"\n";
+					print $fh "  $date->{friendly} ",$date_boundaries->{$date->{friendly}},"\r\n";
 					$current_date = $date->{friendly};
 				}
 				foreach my $cluster (@{$chrono_clusters->{$y_coord}}) {
@@ -911,7 +955,7 @@ sub print_text_report {
 
 sub print_tsv_report {
 	my ($self, $fh) = @_;
-	print $fh "#Unit\tPageNum\tPageID\tPageType\tDate\tPlace\tAnnotationType\tAnnotationValue\n";
+	print $fh "#Unit\tPageNum\tPageID\tPageType\tDate\tPlace\tAnnotationType\tAnnotationValue\r\n";
 	foreach my $page (@{$self->{_pages}}) {
 		my $title 		= $self->{_group_data}{name};
 		my $doctype		= $page->get_doctype();
@@ -926,7 +970,7 @@ sub print_tsv_report {
 		my @hashtags;
 		if (defined (my $hashtags = $page->get_hashtags())) {
 			@hashtags = keys %$hashtags;
-			print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$current_date\t$place\thashtags\t",join(",",@hashtags),"\n" if (@hashtags > 0);
+			print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$current_date\t$place\thashtags\t",join(",",@hashtags),"\r\n" if (@hashtags > 0);
 		}
 		my $chrono_clusters;
 		my $date_boundaries;
@@ -955,7 +999,7 @@ sub print_tsv_report {
 			foreach my $cluster (@{$chrono_clusters->{$y_coord}}) {
 				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
 					if ((my $type = $consensus_annotation->get_type()) ne 'diaryDate') {
-						print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$current_date\t$place\t$type\t",$consensus_annotation->get_string_value(),"\n";
+						print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$current_date\t$place\t$type\t",$consensus_annotation->get_string_value(),"\r\n";
 					}
 				}
 			}
@@ -971,7 +1015,7 @@ sub print_place_person_report {
 	# sometimes a place or person is tagged more than once in a day. There is no point listing these multiple times per day (unless it is
 	# a person mentioned in a different context than previously) so keep track of what we've logged per day.
 	my ($self, $fh) = @_;
-	print $fh "#Unit\tPageNum\tPageID\tPageType\tDate\tPlace\tPeople\n";
+	print $fh "#Unit\tPageNum\tPageID\tPageType\tDate\tPlace\tPeople\r\n";
 	my $current_place = '';
 	foreach my $page (@{$self->{_pages}}) {
 		my $title 		= $self->{_group_data}{name};
@@ -1015,8 +1059,8 @@ sub print_place_person_report {
 				foreach my $person_cluster (@{$chrono_clusters->{$y_coord}{person}}) {
 					if (my $consensus_person = $person_cluster->get_consensus_annotation()) {
 						push @$person, $consensus_person->get_string_value();
-						print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$place\t$person\n";
-						print "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$place\t$person\n";
+						print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$place\t$person\r\n";
+						print "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$place\t$person\r\n";
 						$person_to_log =  1;
 					}
 				}
@@ -1037,7 +1081,7 @@ sub print_place_person_report {
 				}
 			}
 			if ($person_to_log && $place ne $current_place) {
-				print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$place\t\n";
+				print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$place\t\r\n";
 				$current_place = $place;
 			}
 		}
@@ -1046,7 +1090,7 @@ sub print_place_person_report {
 
 sub print_place_report {
 	my ($self, $fh) = @_;
-	print $fh "#Unit\tPageNum\tPageID\tPageType\tDate\tPlace\n";
+	print $fh "#Unit\tPageNum\tPageID\tPageType\tDate\tPlace\tTaggedGeonamesIDs\r\n";
 	foreach my $page (@{$self->{_pages}}) {
 		my $title 		= $self->{_group_data}{name};
 		my $doctype		= $page->get_doctype();
@@ -1065,26 +1109,98 @@ sub print_place_report {
 			}
 		}
 		foreach my $y_coord (sort keys %$chrono_clusters) {
-			my $place = [];
+			my $places = [];
 			$date = ${get_date_for($page_num, $y_coord)}{friendly};
 			foreach my $place_cluster (@{$chrono_clusters->{$y_coord}}) {
+				my $place_ref;
+				foreach my $annotation (@{$place_cluster->{_annotations}}) {
+					if ($annotation->{_annotation_data}{note}{id} ne '') {
+						${$place_ref->{geonames_ids}}{$annotation->{_annotation_data}{note}{id}}++;
+					}
+				}
 				if (my $consensus_place = $place_cluster->get_consensus_annotation()) {
-					push @$place, $consensus_place->get_string_value();
+					$place_ref->{name} = $consensus_place->get_string_value();
+					push @$places, $place_ref;
 				}
 				else {
 					undef;
 				}
 			}
-			if (@$place > 0) {
+			if (@$places > 0) {
 				# we only want to log place names that haven't been mentioned yet today
-				foreach my $place_name (@$place) {
-					next if $place_name eq '';
+				foreach my $place_ref (@$places) {
+					next if $place_ref->{name} eq '';
+					my $place_name = $place_ref->{name};
 					if (!defined $logged_for->{$date}
-						|| !defined $logged_for->{$date}{$place_name}) {
+						|| !defined $logged_for->{$date}{$place_ref->{name}}) {
 						# new place that we haven't yet logged for this day
-						print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$place_name\n";
+						my $geonames_ids = '';
+						if (defined $place_ref->{geonames_ids}) {
+							$geonames_ids = join "|", keys %{$place_ref->{geonames_ids}};
+						}
+						print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$place_name\t$geonames_ids\r\n";
 						$logged_for->{$date}{$place_name} = 1;
 					}
+				}
+			}
+		}
+	}
+}
+
+sub print_person_report {
+	my ($self, $fh) = @_;
+	print $fh "#Unit\tPageNum\tDate\tPlace\tLastname\tFirstname\tRank\tContext\r\n";
+	foreach my $page (@{$self->{_pages}}) {
+		my $title 		= $self->{_group_data}{name};
+		my $doctype		= $page->get_doctype();
+		my $page_num	= $page->get_page_num();
+		my $zooniverse_id	= $page->get_zooniverse_id();
+		my $date = ${get_date_for($page_num, 0)}{friendly};
+		my $current_date;
+		if (!defined($current_date) || $date ne $current_date) {
+			$current_date = $date;
+		}
+		my $logged_for;
+		my $chrono_clusters;
+		if (defined $page->{_clusters}{person}) {
+			foreach my $cluster (@{$page->{_clusters}{person}}) {
+				push @{$chrono_clusters->{$cluster->{median_centroid}[1]}}, $cluster;
+			}
+		}
+		foreach my $y_coord (sort keys %$chrono_clusters) {
+			my $places = [];
+			$date = ${get_date_for($page_num, $y_coord)}{friendly};
+			my $place = get_place_for($page_num, $y_coord);
+			if (ref($place) ne "OWD::ConsensusAnnotation") {
+				if (ref($place) eq "ARRAY") {
+					my $selected_place;
+					print "Place options are:\n";
+					foreach my $place_option (@$place) {
+						my $coords = $place_option->get_coordinates();
+						if (!defined $selected_place || $coords->[0] < $selected_place->get_coordinates()->[0]) {
+							$selected_place = $place_option;
+						}
+						print "  (",$coords->[0],",",$coords->[1],") ",$place_option->get_string_value(),"\n";
+					}
+					$place = $selected_place;
+				}
+			}
+			if (ref($place) eq "OWD::ConsensusAnnotation") {
+				$place = $place->get_note()->{place};
+			}
+			else {
+				$place = '';
+			}
+			foreach my $person_cluster (@{$chrono_clusters->{$y_coord}}) {
+				my $person_ref;
+				if (my $consensus_person = $person_cluster->get_consensus_annotation()) {
+					my $person_note = $consensus_person->get_note();
+					print $fh "$title\t$page_num\t$date\t$place\t$person_note->{surname}\t$person_note->{first}\t$person_note->{rank}\t$person_note->{reason}\r\n";
+					#my $person = $consensus_person->get_string_value();
+					#print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$person\t\r\n";
+				}
+				else {
+					undef;
 				}
 			}
 		}

@@ -175,6 +175,9 @@ sub resolve_disputes {
 										$self->{_annotation_data}{standardised_note}{$standardised_note_field} = 'returned_leave';
 							}
 						}
+						elsif ($standardised_note_field eq 'unit') {
+							$self->{_annotation_data}{standardised_note}{$standardised_note_field} = '';
+						}
 						else {
 							# how do we choose from this combo of values?
 							# BREAKPOINT: improve dispute handling

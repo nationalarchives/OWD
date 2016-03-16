@@ -1,6 +1,7 @@
 package OWD::Annotation;
 use strict;
 use List::MoreUtils;
+use Carp;
 
 my $debug = 1;
 
@@ -303,7 +304,7 @@ sub get_string_value {
 		$string_value = $self->{_annotation_data}{standardised_note};
 	}
 	else {
-		undef;
+		Carp::carp("get_string_value() handler for type '".$self->{_annotation_data}{type}."' is not implemented");
 	}
 	return $string_value;
 }
@@ -438,6 +439,9 @@ sub _standardise_punctuation {
 				if ($standardised_field =~ /\b(?<!')([a-z]+)\b/ 
 						&& $1 !~ /\ble\b/ && $1 !~ /\bl\b/) {
 #					print "No caps: $standardised_field\n";
+					if ($self->{_annotation_data}{type} eq 'person') {
+						undef;
+					}
 					$standardised_field = ucfirst(lc($standardised_field)) if ($standardised_field =~ /^[a-z]/);
 				}
 				$standardised_field =~ s/^\s+//;

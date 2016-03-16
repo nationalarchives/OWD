@@ -274,7 +274,7 @@ sub cluster_tags {
 	}
 	foreach my $cluster_type (keys %{$self->{_clusters}}) {
 		foreach my $cluster (@{$self->{_clusters}{$cluster_type}}) {
-			if (@{$cluster->{_annotations}} <= 1) {
+			if ($cluster->count_annotations() <= 1) {
 				my $annotation = $cluster->{_annotations}[0];
 				my $id = $annotation->get_id();
 				my $string = $annotation->get_string_value();
@@ -382,7 +382,7 @@ sub _match_annotation_against_existing {
 
 sub dump_clusters {
 	my ($self,$type_to_dump) = @_;
-	foreach my $cluster_type (keys %$self->{_clusters}) {
+	foreach my $cluster_type (keys %{$self->{_clusters}}) {
 		next if (defined $type_to_dump && $cluster_type ne $type_to_dump);
 		print "$cluster_type\n";
 		my $cluster_num = 0;

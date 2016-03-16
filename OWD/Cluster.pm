@@ -217,7 +217,7 @@ sub establish_consensus {
 					}
 					$error = {
 						'type'		=> 'cluster_error; value_tie',
-						'detail'	=> 'the value for the cluster was a tie of two or more different values',
+						'detail'	=> "the most popular value for the \'$type\' cluster was a tie of two or more different values",
 					};
 				}
 			}
@@ -236,7 +236,7 @@ sub establish_consensus {
 				}
 				$error = {
 					'type'		=> 'cluster_error; value_tie',
-					'detail'	=> 'there were multiple values for the cluster, but no value had the agreement of two or more users',
+					'detail'	=> "the most popular value for the \'$type\' cluster was a tie of two or more different values",
 				};
 			}
 			else {
@@ -301,7 +301,7 @@ sub establish_consensus {
 						my $value_string = join "|",@{$consensus_annotation->{standardised_note}{$key}};
 						push @$error, {
 							'type'		=> 'cluster_error; value_tie',
-							'detail'	=> 'field '.$key.' in the cluster was a tie of two or more different values ($value_string)',
+							'detail'	=> "the most popular value for the \'$type:$key\' cluster was a tie of two or more different values ($value_string)",
 						};
 					}
 				}
@@ -320,7 +320,7 @@ sub establish_consensus {
 					my $value_string = join "|",@{$consensus_annotation->{standardised_note}{$key}};
 					push @$error, {
 						'type'		=> 'cluster_error; value_tie',
-						'detail'	=> 'field '.$key.' in the cluster was a tie of two or more different values ($value_string)',
+						'detail'	=> "the most popular value for the \'$type:$key\' cluster was a tie of two or more different values ($value_string)",
 					};
 				}
 				else {

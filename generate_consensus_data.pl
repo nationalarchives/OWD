@@ -79,13 +79,13 @@ sub diary_tasks {
 		print "Clustering tags\n";
 		$diary->cluster_tags();
 		print "Establishing consensus\n";
-		$diary->establish_consensus();
+		$diary->establish_consensus(); # establish_consensus includes create_place_lookup
 
 		# create_place_lookup populates a hash keyed by page and y-coord listing the consensus places
 		# Each row will have one or more place ConsensusAnnotations
 		print "Creating place lookup\n";
 		$diary->create_place_lookup();
-		#$diary->resolve_uncertainty();
+		$diary->resolve_uncertainty();
 		#$diary->fix_suspect_diaryDates();
 #		open my $text_report, ">", "output/$diary_id-text.txt";
 #		$diary->print_text_report($text_report);
@@ -93,6 +93,10 @@ sub diary_tasks {
 #		open my $place_person_report, ">", "output/$diary_id-place-person.tsv";
 #		$diary->print_place_person_report($place_person_report);
 #		close $place_person_report;
+#		$diary->rationalise_person_names();
+		open my $person_report, ">", "output/$diary_id-person.tsv";
+		$diary->print_person_report($person_report);
+		close $person_report;
 		open my $place_report, ">", "output/$diary_id-place.tsv";
 		$diary->print_place_report($place_report);
 		close $place_report;
