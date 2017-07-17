@@ -8,13 +8,13 @@ use Data::Dumper;
 # db connection strings
 my $debug = 3;
 my $war_diary_server	= "localhost:27017";
-my $war_diary_db_name	= "war_diary_2015-06-18";	# the raw source data
+my $war_diary_db_name	= "war_diary_2017-07-10";	# the raw source data
 my $war_diary_output_db	= "war_diary_export";		# the exported consensus data
 my $war_diary_logging_db = "war_diary_logging";		# the logging db, recording any errors in clustering and consensus finding
 my $war_diary_tags		= "ouroboros_production";	# the raw Talk pages (for hash tags and page talk)
 my $war_diary_confirmed	= "war_diary_confirmed";
 
-my $client 		= MongoDB::MongoClient->new(host => $war_diary_server,query_timeout => 50000);
+my $client 		= MongoDB->connect("mongodb://$war_diary_server",{"max_time_ms" => 50000});
 my $db 			= $client->get_database($war_diary_db_name);
 my $output_db	= $client->get_database($war_diary_output_db);
 my $logging_db 	= $client->get_database($war_diary_logging_db);

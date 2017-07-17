@@ -168,7 +168,7 @@ sub get_key_with_most_array_elements {
 
 sub data_error {
 	my ($self,$error_hash) = @_;
-	$self->get_error_collection->insert($error_hash);
+	$self->get_error_collection->insert_one($error_hash);
 }
 
 =pod

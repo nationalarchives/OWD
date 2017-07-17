@@ -103,7 +103,7 @@ sub strip_multiple_classifications_by_single_user {
 		if ($value > 1) {
 			my $best_classification = "";
 			#print "$user has multiple classifications for $self->{_page_data}{zooniverse_id}\n";
-			$coll_log->insert({
+			$coll_log->insert_one({
 				'diary'			=> {
 					'group_id'		=> $self->{_diary}->get_zooniverse_id(),
 					'docref'		=> $self->{_diary}->get_docref(),
@@ -156,7 +156,7 @@ sub strip_multiple_classifications_by_single_user {
 	my $num_classifications_after_strip = $self->num_classifications();
 	if ($num_classifications_before_strip > $num_classifications_after_strip) {
 		my $diff = $num_classifications_before_strip - $num_classifications_after_strip;
-		$coll_log->insert({
+		$coll_log->insert_one({
 			'diary'			=> {
 				'group_id'		=> $self->{_diary}->get_zooniverse_id(),
 				'docref'		=> $self->{_diary}->get_docref(),
