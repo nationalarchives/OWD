@@ -219,6 +219,9 @@ sub get_doctype {
 		carp("get_doctype called on OWD::Page object before annotations have been clustered");
 		return;
 	}
+	if (ref($self->{_clusters}{doctype}[0]) ne "OWD::Cluster") {
+		return;
+	}
 	my $consensus_annotation = $self->{_clusters}{doctype}[0]->get_consensus_annotation();
 	if (ref($consensus_annotation) ne 'OWD::ConsensusAnnotation') {
 		return;
@@ -230,7 +233,12 @@ sub get_doctype {
 
 sub num_classifications {
 	my ($self) = @_;
-	return scalar @{$self->{_classifications}};
+	if (defined $self->{_classifications}) {
+		return scalar @{$self->{_classifications}};
+	}
+	else {
+		return 0;
+	}
 }
 
 sub cluster_tags {
