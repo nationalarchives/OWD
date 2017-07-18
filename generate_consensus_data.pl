@@ -64,8 +64,8 @@ sub diary_tasks {
 #	}
 	print "Processing diary $diary_id\n";
 	# clear down the log db for this diary ID
-	$owd->get_logging_db()->get_collection('error')->remove({"diary.group_id" => "$diary_id"});
-	$owd->get_logging_db()->get_collection('log')->remove({"diary.group_id" => "$diary_id"});
+	$owd->get_logging_db()->get_collection('error')->delete_one({"diary.group_id" => "$diary_id"});
+	$owd->get_logging_db()->get_collection('log')->delete_one({"diary.group_id" => "$diary_id"});
 	print "$diary_count: ",$diary->get_docref()," (".$diary->get_zooniverse_id().")\n";
 	if ($diary->get_status() eq "complete") {
 		$diary->load_pages(); # loads all the per-page metadata into the Diary object
