@@ -7,6 +7,9 @@ use Data::Dumper;
 use Text::LevenshteinXS;
 use Carp;
 use DateTime::Format::Natural;
+use Log::Log4perl;
+
+my $logger = Log::Log4perl->get_logger();
 
 $Data::Dumper::Maxdepth = 4;
 my $debug = 1;
@@ -14,32 +17,32 @@ my $diaryDate_y_axis_skew = -2; # keep this in sync with the similar value in Cl
 
 sub new {
 	my ($class, $_diary, $_subject) = @_;
+	$logger->trace("OWD::Page constructor called");
 	return bless {
 		'_page_data'	=> $_subject,
 		'_diary'		=> $_diary,
 	}, $class;
 	# ^ destroy _diary circular ref when the page is destroyed
-	
 }
 
 sub load_classifications {
-	print "OWD::Page::load_classifications() called\n" if $debug > 2;
+	$logger->trace("OWD::Page::load_classifications() called");
 	my ($self) = @_;
 	my $page = $self->get_page_num();
-#	print "page $page\n"; # DEBUG DELETE
 	my $_classifications = [];
-	print "performing mongo query to fetch classifications for this page\ndb.war_diary_classifications.find({'subjects.zooniverse_id': ".$self->{_page_data}->{zooniverse_id}."})" if $debug > 2;
+	$logger->trace("performing mongo query to fetch classifications for this page\ndb.war_diary_classifications.find({'subjects.zooniverse_id': ".$self->{_page_data}->{zooniverse_id}."})");
 	my $cur_classifications = 
 		$self->{_diary}->{_processor}->{coll_classifications}->find(
 			{'subjects.zooniverse_id' => $self->{_page_data}->{zooniverse_id} }
 		);
-	$cur_classifications->fields({'annotations'=>1,'subjects'=>1,'updated_at'=>1,'user_ip'=>1,'user_name'=>1});
+	$cur_classifications->fields({'annotations'=>1,'subjects'=>1,'updated_at'=>1,'user_ip'=>1,'user_name'=>1,'_id'=>1});
 	$cur_classifications->sort({"_id" => 1});
 	if ($cur_classifications->has_next) {
-		print "Iterating through classifications cursor\n" if $debug > 2;
+		$logger->trace("  Iterating through classifications cursor");
 		while (my $classification = $cur_classifications->next) {
 			push @$_classifications, OWD::Classification->new($self,$classification);
 		}
+		$logger->debug("  Completed iterating through classifications. ",scalar(@$_classifications)," classifications found");
 		my $sorted_classifications = [sort {$a->{_classification_data}{user_name} cmp $b->{_classification_data}{user_name}} @$_classifications];
 		$self->{_classifications} = $sorted_classifications;
 		undef $cur_classifications;
@@ -239,6 +242,7 @@ sub cluster_tags {
 	# For each tag type, use the annotations by the user with the most contributions for that
 	# tag type to create a skeleton cluster layout, then try to match the tags of this type
 	# from other users to these clusters.
+	$logger->trace("cluster_tags called");
 	my $annotations_by_type_and_user = $self->get_annotations_by_type_and_user();
 	foreach my $user (keys %{$annotations_by_type_and_user->{doctype}}) {
 		#push @{$self->{_clusters}{doctype}}, $annotations_by_type_and_user->{doctype}{$user}[0];
@@ -494,6 +498,7 @@ sub similarity {
 
 sub establish_consensus {
 	my ($self) = @_;
+	$logger->debug("Establishing consensus for page", $self->get_page_num());
 	foreach my $type (keys %{$self->{_clusters}}) {
 		foreach my $cluster (@{$self->{_clusters}{$type}}) {
 			$cluster->establish_consensus();

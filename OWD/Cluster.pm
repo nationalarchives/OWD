@@ -2,6 +2,7 @@ package OWD::Cluster;
 use strict;
 use Data::Dumper;
 use OWD::ConsensusAnnotation;
+use Log::Log4perl;
 use constant {
 	TIE_FOR_MOST_POPULAR_VALUE	=> 1,
 	LONE_USER_SUBMITTED			=> 2,
@@ -9,6 +10,8 @@ use constant {
 	MAJORITY_CONSENSUS			=> 4,
 	UNANIMOUS_CONSENSUS			=> 5,
 };
+
+my $logger = Log::Log4perl->get_logger();
 
 my $core_consensus_fields = {
 	'casualties'=> {
@@ -42,6 +45,7 @@ my $core_consensus_fields = {
 my $diaryDate_y_axis_skew = -2; # keep this in sync with the similar value in Page.pm
 
 sub new {
+	$logger->trace("OWD::Cluster::new() called");
 	my ($class, $page, $annotation) = @_;
 	my $obj = bless {}, $class;
 	$obj->{_page} = $page;
@@ -178,11 +182,12 @@ sub establish_consensus {
 	my $consensus_annotation;
 	$consensus_annotation->{type} = $self->{_annotations}[0]->get_type();
 	$consensus_annotation->{coords} = $self->{median_centroid};
-	my $value_counts = $self->_get_annotation_value_scores(); # count up any note values
+	my $value_counts = $self->_get_annotation_value_scores(); # count up each note value to judge consensus
 
 	my $enough_consensus = 1; # we'll unset this if an annotation fails consensus requirements
 	my $status_of_field;
 	my $type = $consensus_annotation->{type};
+	$logger->debug("Establishing Consensus for a $type cluster at ", join(",",@{$consensus_annotation->{coords}}[0,1]));
 	my $error;
 	my $note_type;
 	if (ref($value_counts->{ (keys %$value_counts)[0] }) ne "HASH") {
@@ -197,7 +202,7 @@ sub establish_consensus {
 		# Order the values, most popular first
 		my @values = reverse sort { $value_counts->{$a} <=> $value_counts->{$b} } keys %$value_counts;
 		if (@values > 1 && $values[0] eq '') {
-			undef;
+			$logger->error("The most popular value for this field of the cluster is blank, although there are other less popular non-blank fields");
 		}
 		if ($value_counts->{$values[0]} > 1) {
 			# more than one user agreed on a value, check if there was unanimity on the value 
@@ -213,8 +218,10 @@ sub establish_consensus {
 					# to possibly unpick later with more context
 					my $tied_score = $value_counts->{$values[0]};
 					foreach my $value (@values) {
+						# for each value with the top (tied) score, add it to an array for the cluster consensus for this field
 						push @{$consensus_annotation->{standardised_note}}, $value if $value_counts->{$value} == $tied_score;
 					}
+					$logger->error("More than one value for a cluster field were tied");
 					$error = {
 						'type'		=> 'cluster_error; value_tie',
 						'detail'	=> "the most popular value for the \'$type\' cluster was a tie of two or more different values",
@@ -222,6 +229,7 @@ sub establish_consensus {
 				}
 			}
 			else {
+				# Users agreed on a single value for a field
 				$consensus_annotation->{standardised_note} = $values[0];
 				$status_of_field = UNANIMOUS_CONSENSUS;
 			}
@@ -234,6 +242,7 @@ sub establish_consensus {
 				foreach my $value (@values) {
 					push @{$consensus_annotation->{standardised_note}}, $value if $value_counts->{$value} == $tied_score;
 				}
+				$logger->error("More than one value for a cluster field were tied");
 				$error = {
 					'type'		=> 'cluster_error; value_tie',
 					'detail'	=> "the most popular value for the \'$type\' cluster was a tie of two or more different values",
@@ -242,6 +251,7 @@ sub establish_consensus {
 			else {
 				# lonely cluster
 				$status_of_field = LONE_USER_SUBMITTED;
+				$logger->error("Lonely annotation cluster");
 #				The error state below is already logged at the cluster_tags() stage
 #				$error = {
 #					'type'				=> 'cluster_error; lonely_cluster',
@@ -279,7 +289,6 @@ sub establish_consensus {
 		foreach my $key (keys %$value_counts) {
 			my @values = reverse sort { $value_counts->{$key}{$a} <=> $value_counts->{$key}{$b} } keys %{$value_counts->{$key}};
 			if (@values > 1 && $values[0] eq '') {
-				undef;
 				shift @values;
 				delete $value_counts->{$key}{''};
 			}
@@ -338,23 +347,27 @@ sub establish_consensus {
 		}
 		# Check here if there was enough consensus to make a meaningful consensus annotation
 		if (defined($core_consensus_fields->{ $type })) {
+			$logger->debug("Core consensus constraint set for type $type");
 			# if core consensus fields are defined, check they are met before trying to create a
 			# ConsensusAnnotation. If they aren't, log an error at this stage
 			if (ref($core_consensus_fields->{$type}) eq 'HASH') {
 				foreach my $field (keys %{$core_consensus_fields->{$type}}) {
 					if ($status_of_field->{$field} < $core_consensus_fields->{$type}{$field}) {
+						$logger->debug("Core consensus constraint failed on field $field");
 						$enough_consensus = 0;
 					}
 				} 
 			}
 			else {
 				if ($status_of_field < $core_consensus_fields->{$type}) {
+					$logger->debug("Core consensus constraint failed");
 					$enough_consensus = 0;
 				}
 			}
 		}
 		else {
 			# There are no consensus constraints on this annotation type. Use a default of PLURALITY_CONSENSUS
+			$logger->debug("No core consensus constraint set for type $type");
 			$enough_consensus = 1;
 			foreach my $value (values %$status_of_field) {
 				if ($value < 3) {
@@ -371,11 +384,13 @@ sub establish_consensus {
 		# We should only bless our $consensus_annotation structure as an object if it has a standardised_note
 		# field. If it was not possible to get consensus, there's no point creating a ConsensusAnnotation object
 		if (defined($consensus_annotation->{standardised_note})) {
+			$logger->trace("Generated consensus annotation");
 			my $obj_consensus = OWD::ConsensusAnnotation->new($self,$consensus_annotation);
 			$self->{consensus_annotation} = $obj_consensus;
 		}
 	}
 	else {
+		$logger->debug("Unable to get consensus for $type cluster");
 		if (ref($error) eq 'ARRAY') {
 			foreach my $error (@$error) {
 				$self->data_error($error);
@@ -391,15 +406,13 @@ sub _get_annotation_value_scores {
 	my ($self) = @_;
 	my $annotations = $self->{_annotations};
 	my $value_counts;
-	my $note_type = 'SCALAR';
 
 	# tally the number of instances of each value to get a "degree of consensus" score
 	if (ref($annotations) ne "ARRAY") {
-		undef;
+		$logger->error("Found a cluster whose {_annotations} field isn't a cluster");
 	}
 	foreach my $annotation (@$annotations) {
 		if (ref($annotation->{_annotation_data}{standardised_note}) eq 'HASH') {
-			$note_type = 'HASH';
 			foreach my $key (keys %{$annotation->{_annotation_data}{standardised_note}}) {
 				$value_counts->{$key}{$annotation->{_annotation_data}{standardised_note}{$key}}++;
 			}

@@ -7,6 +7,9 @@ use Data::Dumper;
 use DateTime::Format::Natural;
 use Text::LevenshteinXS;
 use List::Util;
+use Log::Log4perl;
+
+my $logger = Log::Log4perl->get_logger();
 
 my $debug = 1;
 my $date_lookup = {};
@@ -47,40 +50,36 @@ sub new {
 
 sub load_pages {
 	my ($self) = @_;
-	print "Loading page data for current diary\n" if $debug;
+	$logger->debug("Loading page data for current diary");
 	my $subjects_ref = [];	# an array of subjects (pages) within the diary, sorted by page number
-	my @stage;
-	push @stage,{'stage' => 'find() method call','time' => time()};
 	my $cur_subjects = $self->{_processor}->{coll_subjects}->find({"group.zooniverse_id" => $self->get_zooniverse_id()});
-	push @stage,{'stage' => 'field_selection','time' => time()};
 	$cur_subjects->fields({'classification_count'=>1,'group'=>1,'location'=>1,'metadata'=>1,'state'=>1,'zooniverse_id'=>1});
-	push @stage,{'stage' => 'sort','time' => time()};
 	$cur_subjects->sort({"metadata.page_number" => 1});
-	push @stage,{'stage' => 'has_next','time' => time()};
+	$logger->trace("Querying Mongo Subjects collection for pages");
+	my $page_count = 0;
 	if ($cur_subjects->has_next) {
-		push @stage,{'stage' => '','time' => time()};
+		$logger->trace("  iterating");
 		while (my $subject = $cur_subjects->next) {
 			# OWD::Page->new() creates a Page object with the passed metadata
 			push @$subjects_ref, OWD::Page->new($self,$subject);
+			$page_count++;
 		}
+		$logger->trace("  complete ($page_count pages)");
 	}
 	undef $cur_subjects;
-	for (my $stage_num=0; $stage_num<@stage-1;$stage_num++) {
-		print $stage[$stage_num]{stage}, ": ", $stage[$stage_num+1]{time} - $stage[$stage_num]{time}, "s\n";
-	}
 	$self->{_pages}		= $subjects_ref;
 	return 1;
 }
 
 sub load_classifications {
-	print "OWD::Diary::load_classifications() called\n" if $debug > 2;
+	$logger->trace("OWD::Diary::load_classifications() called");
 	my ($self) = @_;
 	my $diary_return_val = 0;
 	if (!defined $self->{_pages}) {
 		$self->load_pages();
 	}
 	foreach my $page (@{$self->{_pages}}) {
-		print "  page ", $page->get_page_num(), "\n";
+		$logger->debug("loading classifications for page ", $page->get_page_num()," (",$page->get_zooniverse_id(),")");
 		my $return_val = $page->load_classifications();
 		if ($return_val) {
 			$diary_return_val++;
@@ -90,6 +89,7 @@ sub load_classifications {
 }
 
 sub load_hashtags {
+	$logger->debug("load_hashtags called on diary");
 	my ($self) = @_;
 	if (!defined $self->{_pages}) {
 		$self->load_pages();
@@ -186,6 +186,7 @@ sub report_pages_with_insufficient_classifications {
 }
 
 sub cluster_tags {
+	$logger->trace("cluster_tags called");
 	my ($self) = @_;
 	if (!defined $self->{_pages}) {
 		$self->load_pages();
@@ -198,6 +199,7 @@ sub cluster_tags {
 }
 
 sub establish_consensus {
+	$logger->trace("establish_consensus called");
 	my ($self) = @_;
 
 	# for pages that have no consensus on diaryDate clusters, it can be impossible to verify the date on the page in isolation
@@ -212,6 +214,7 @@ sub establish_consensus {
 	foreach my $page (@{$self->{_pages}}) {
 		$page->establish_consensus();
 	}
+	$logger->debug("Getting the date range for each page");
 	foreach my $page (@{$self->{_pages}}) {
 		$self->{date_range}{$page->get_page_num()} = $page->get_date_range();
 	}
@@ -224,7 +227,6 @@ sub establish_consensus {
 	# TODO: get the range of consensus diaryDates per page, then use this to inform the decision on disputed dates.
 	# Create subs for OWD::Page->get_consensus_date_range()
 	$self->create_date_lookup();
-	undef;	
 }
 
 sub data_error {
@@ -262,6 +264,7 @@ sub report_date_ranges_per_page {
 
 sub create_date_lookup {
 	my ($self) = @_;
+	$logger->debug("create_date_lookup called");
 	my $acceptable_date_jump = 18; # the number of days between two entries in the diary before we trigger
 								   # more checking
 	my $date_parser = DateTime::Format::Natural->new();
@@ -796,11 +799,6 @@ sub create_place_lookup {
 			foreach my $cluster (sort { $a->{median_centroid}[1] <=> $b->{median_centroid}[1] } @{$page->{_clusters}{place}}) {
 				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
 					my $place_y_coord = $cluster->{median_centroid}[1];
-					if (ref($consensus_annotation) eq 'ARRAY') {
-						# we have multiple possible places for this cluster
-						# try looking them up in Geonames? Select the nearest to last known location
-						undef;
-					}
 					if (defined($page_place_lookup->{$place_y_coord})) {
 						# we already have a place for this page number and row.
 						if (ref($page_place_lookup->{$place_y_coord}) eq 'OWD::ConsensusAnnotation') {
@@ -815,7 +813,7 @@ sub create_place_lookup {
 						elsif (ref($page_place_lookup->{$place_y_coord}) eq 'ARRAY') {
 							# we have at least three dates for this row.
 							# Add the new date to the existing array for dealing with later
-							undef;
+							$logger->warn("Consensus annotation for a place is an array");;
 							push @{$page_place_lookup->{$place_y_coord}}, $consensus_annotation;
 						}
 					}
@@ -825,7 +823,7 @@ sub create_place_lookup {
 				}
 				else {
 					# no consensus annotation for this place cluster
-					undef;
+					$logger->warn("No consensus annotation for a place cluster");
 				}
 			}
 			my @rows = sort {$a <=> $b} keys %$page_place_lookup;
@@ -1089,30 +1087,36 @@ sub print_place_person_report {
 }
 
 sub print_place_report {
+	# this sub creates a TSV file of the places mentioned in the diary
 	my ($self, $fh) = @_;
-	print $fh "#Unit\tPageNum\tPageID\tPageType\tDate\tPlace\tTaggedGeonamesIDs\r\n";
+	print $fh "#Unit\tPageNum\tPageID\tPageType\tDate\tPlace\tLatLong\tTaggedGeonamesIDs\r\n";
 	foreach my $page (@{$self->{_pages}}) {
+		# first iterate through the pages (which are already in order in the _pages array)
 		my $title 		= $self->{_group_data}{name};
 		my $doctype		= $page->get_doctype();
 		my $page_num	= $page->get_page_num();
 		my $zooniverse_id	= $page->get_zooniverse_id();
 		my $date = ${get_date_for($page_num, 0)}{friendly};
+		# the current_date variable will keep track of the most recently tagged date as we move down the page
 		my $current_date;
 		if (!defined($current_date) || $date ne $current_date) {
 			$current_date = $date;
 		}
 		my $logged_for;
+		# arrange the place clusters in a $chrono_clusters hash keyed by of y-axis co-ordinate
 		my $chrono_clusters;
 		if (defined $page->{_clusters}{place}) {
 			foreach my $cluster (@{$page->{_clusters}{place}}) {
 				push @{$chrono_clusters->{$cluster->{median_centroid}[1]}}, $cluster;
 			}
 		}
+		# now iterate through the places as we proceed down the page (ie order of y-coord value
 		foreach my $y_coord (sort keys %$chrono_clusters) {
 			my $places = [];
 			$date = ${get_date_for($page_num, $y_coord)}{friendly};
 			foreach my $place_cluster (@{$chrono_clusters->{$y_coord}}) {
 				my $place_ref;
+				# in the next block we keep track of which Geonames places we've seen and how often
 				foreach my $annotation (@{$place_cluster->{_annotations}}) {
 					if ($annotation->{_annotation_data}{note}{id} ne '') {
 						${$place_ref->{geonames_ids}}{$annotation->{_annotation_data}{note}{id}}++;
@@ -1120,10 +1124,16 @@ sub print_place_report {
 				}
 				if (my $consensus_place = $place_cluster->get_consensus_annotation()) {
 					$place_ref->{name} = $consensus_place->get_string_value();
+					if (defined(my $latlong = $consensus_place->get_field('latlong'))) {
+						$place_ref->{latlong} = $latlong;
+					}
+					else {
+						$place_ref->{latlong} = '';
+					}
 					push @$places, $place_ref;
 				}
 				else {
-					undef;
+					$logger->debug("Found place without consensus annotation");
 				}
 			}
 			if (@$places > 0) {
@@ -1131,6 +1141,7 @@ sub print_place_report {
 				foreach my $place_ref (@$places) {
 					next if $place_ref->{name} eq '';
 					my $place_name = $place_ref->{name};
+					my $place_latlong = $place_ref->{latlong};
 					if (!defined $logged_for->{$date}
 						|| !defined $logged_for->{$date}{$place_ref->{name}}) {
 						# new place that we haven't yet logged for this day
@@ -1138,7 +1149,7 @@ sub print_place_report {
 						if (defined $place_ref->{geonames_ids}) {
 							$geonames_ids = join "|", keys %{$place_ref->{geonames_ids}};
 						}
-						print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$place_name\t$geonames_ids\r\n";
+						print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$place_name\t$place_latlong\t$geonames_ids\r\n";
 						$logged_for->{$date}{$place_name} = 1;
 					}
 				}
@@ -1149,8 +1160,9 @@ sub print_place_report {
 
 sub print_person_report {
 	my ($self, $fh) = @_;
-	print $fh "#Unit\tPageNum\tDate\tPlace\tLastname\tFirstname\tRank\tContext\r\n";
+	print $fh "#Unit\tPageNum\tDate\tPlace\tLatLong\tLastname\tFirstname\tRank\tContext\r\n";
 	foreach my $page (@{$self->{_pages}}) {
+		# iterate through _pages (which are already in ascending order)
 		my $title 		= $self->{_group_data}{name};
 		my $doctype		= $page->get_doctype();
 		my $page_num	= $page->get_page_num();
@@ -1162,21 +1174,25 @@ sub print_person_report {
 		}
 		my $logged_for;
 		my $chrono_clusters;
+		# arrange the person clusters in order of y axis position in $chrono_clusters
 		if (defined $page->{_clusters}{person}) {
 			foreach my $cluster (@{$page->{_clusters}{person}}) {
 				push @{$chrono_clusters->{$cluster->{median_centroid}[1]}}, $cluster;
 			}
 		}
+		# for each y co-ordinate, get the current location of the unit at that point
 		foreach my $y_coord (sort keys %$chrono_clusters) {
 			my $places = [];
 			$date = ${get_date_for($page_num, $y_coord)}{friendly};
 			my $place = get_place_for($page_num, $y_coord);
+			# $place will either be type ConsensusAnnotation or an array of ConsensusAnnotations
 			if (ref($place) ne "OWD::ConsensusAnnotation") {
 				if (ref($place) eq "ARRAY") {
 					my $selected_place;
 					print "Place options are:\n";
 					foreach my $place_option (@$place) {
 						my $coords = $place_option->get_coordinates();
+						# from the array of options, select the one that is leftmost on the page
 						if (!defined $selected_place || $coords->[0] < $selected_place->get_coordinates()->[0]) {
 							$selected_place = $place_option;
 						}
@@ -1185,22 +1201,22 @@ sub print_person_report {
 					$place = $selected_place;
 				}
 			}
+			my $placename = '';
+			my $latlong = '';
 			if (ref($place) eq "OWD::ConsensusAnnotation") {
-				$place = $place->get_note()->{place};
-			}
-			else {
-				$place = '';
+				$placename = $place->get_note()->{place};
+				$latlong = $place->get_note()->{latlong};
 			}
 			foreach my $person_cluster (@{$chrono_clusters->{$y_coord}}) {
 				my $person_ref;
 				if (my $consensus_person = $person_cluster->get_consensus_annotation()) {
 					my $person_note = $consensus_person->get_note();
-					print $fh "$title\t$page_num\t$date\t$place\t$person_note->{surname}\t$person_note->{first}\t$person_note->{rank}\t$person_note->{reason}\r\n";
+					print $fh "$title\t$page_num\t$date\t$place\t$latlong\t$person_note->{surname}\t$person_note->{first}\t$person_note->{rank}\t$person_note->{reason}\r\n";
 					#my $person = $consensus_person->get_string_value();
 					#print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$person\t\r\n";
 				}
 				else {
-					undef;
+					$logger->warn("No consensus annotation for person");
 				}
 			}
 		}

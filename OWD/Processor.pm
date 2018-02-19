@@ -2,13 +2,17 @@ package OWD::Processor;
 use strict;
 use warnings;
 use Carp;
+use Log::Log4perl;
 
 use OWD::Diary;
+
+my $logger = Log::Log4perl->get_logger();
 
 my $group_iterator = 0; # keep track of the next diary in the array of diaries to return.
 my $groups_ref = [];	# holds an array of groups (diaries) which can be iterated by index number
 
 sub new {
+	$logger->trace("OWD::Processor Constructor called");
 	my ($class) = @_;
 	return bless {}, $class;
 }
@@ -16,20 +20,25 @@ sub new {
 sub set_database {
 	my ($self, $db) = @_;
 	if ( ref($db) eq "MongoDB::Database" && $db->get_collection("war_diary_groups")) {
+		$logger->trace("set_database called with War Diary database. Setting up MongoDB collection references.");
 		$self->{database}		= $db;
 		$self->{coll_groups}	= $db->get_collection("war_diary_groups");
 		$self->{coll_subjects}	= $db->get_collection("war_diary_subjects");
 		$self->{coll_classifications}	= $db->get_collection("war_diary_classifications");
+		$logger->trace("Populating \$groups_ref with list of groups (diaries) from Mongo");
 		my $cur_groups = $self->{coll_groups}->find({});
 		$cur_groups->fields({'metadata' => 1,'name' => 1,'state' => 1,'stats' => 1,'zooniverse_id' => 1});
 		if ($cur_groups->has_next) {
+			$logger->trace("  iterating...");
 			while (my $group = $cur_groups->next) {
 				push @$groups_ref, $group;
 			}
+			$logger->trace("  complete...");
 		}
 		return 1;
 	}
 	else {
+		$logger->error("set_datebase called with invalid database: Must be Operation War Diary db");
 		return;
 	}
 }
@@ -123,6 +132,7 @@ sub get_hashtags_collection {
 sub get_diary {
 	my ($self, $id) = @_;
 	if (!defined $id) {
+		$logger->trace("get_diary called without an id. Fetching the next diary from the iterator's list");
 		# in this case return diaries in sequence each time the get_diary function is called.
 		# presumably we need to keep track of the last returned diary so that we don't return the same diary again
 		#print "\$group_iterator = $group_iterator\n";
@@ -131,11 +141,13 @@ sub get_diary {
 			return OWD::Diary->new($self,$group);
 		}
 		else {
+			$logger->trace("group (diary) iterator complete");
 			return;
 		}
 	}
 	elsif ($id =~ m|^GWD|) {
 		# OWD Groups (diaries) begin "GWD", in this case return the specific requested diary
+		$logger->trace("get_diary called with id $id");
 		foreach my $group (@$groups_ref) {
 			return OWD::Diary->new($self,$group) if $group->{zooniverse_id} eq $id;
 		}
@@ -164,6 +176,14 @@ sub get_key_with_most_array_elements {
 		}
 	}
 	return $return_val;
+}
+
+sub get_zooniverse_id_to_iaid_mapping {
+	my %zid_to_iaid;
+	foreach my $group (@$groups_ref) {
+		$zid_to_iaid{ $group->{zooniverse_id} } = $group->{metadata}{id};
+	}
+	return \%zid_to_iaid;
 }
 
 sub data_error {

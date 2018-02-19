@@ -2,6 +2,10 @@ package OWD::Annotation;
 use strict;
 use List::MoreUtils;
 use Carp;
+use Log::Log4perl;
+use Data::Dumper;
+
+my $logger = Log::Log4perl->get_logger();
 
 my $debug = 1;
 
@@ -94,7 +98,7 @@ my $free_text_fields = {
 
 sub new {
 	my ($class, $_classification, $_annotation) = @_;
-	print "OWD::Annotation->new() called on $_annotation->{id}\n" if $debug > 2;
+	$logger->trace("OWD::Annotation->new() called on $_annotation->{id}");
 	# some "cleaning" needs to be done to the raw data to improve chances of consensus
 	# - extraneous spacing and punctuation were sometimes added by users in free text fields
 	# - bugs in the application allowed things like inconsistent date formats, invalid dates, 
@@ -131,6 +135,7 @@ sub new {
 				|| ($obj->{_annotation_data}{standardised_note}{surname} =~ /^george$/i
 					&& $obj->{_annotation_data}{standardised_note}{first} =~ /^king$/i)
 				)) {
+			$logger->debug("Found a reference to the King",Dumper $obj->{_annotation_data}{standardised_note});
 			$obj->{_annotation_data}{standardised_note}{rank} = 'other';
 			$obj->{_annotation_data}{standardised_note}{first} = 'George';
 			$obj->{_annotation_data}{standardised_note}{surname} = 'H M The King';
@@ -145,10 +150,20 @@ sub new {
 			# question marks, etc)
 			if ($_annotation->{type} eq "person" || $_annotation->{type} eq "place" || $_annotation->{type} eq "unit" || $_annotation->{type} eq "gridRef") {
 				$data_has_been_modified = $obj->_standardise_punctuation(); # fix spaces and strip question marks
+				# for places, create a LatLong field because by the time we establish the consensus annotations, the lattitudes get
+				# dumped in one pile and the longitudes in another. They need to be analysed together.
+				if ($_annotation->{type} eq "place") {
+					if ($_annotation->{note}{lat} ne '') {
+						$obj->{_annotation_data}{standardised_note}{latlong} = $_annotation->{note}{lat}.",".$_annotation->{note}{long};
+					}
+					else {
+						$obj->{_annotation_data}{standardised_note}{latlong} = '';
+					}
+				}
 			}
 			else {
 				if (!defined $valid_annotation_types->{$obj->{_annotation_data}{type}}) {
-					undef;
+					$logger->error("We have an unhandled annotation type: ", $obj->{_annotation_data}{type});
 				}
 			}
 			if ($obj->{_annotation_data}{type} ne 'doctype') {
@@ -354,7 +369,7 @@ sub _standardise_punctuation {
 	# strip out multiple consecutive spaces
 	# strip out leading spaces and trailing spaces
 	my ($self) = @_;
-	print "OWD::Annotation->_standardise_punctuation() called\n" if $debug > 2;
+	$logger->trace("OWD::Annotation->_standardise_punctuation() called");
 	my $standardised_note;
 	my $note_has_been_modified = 0;
 	if (ref($self->{_annotation_data}{standardised_note}) eq "HASH") {
@@ -364,8 +379,8 @@ sub _standardise_punctuation {
 			if ($free_text_fields->{$type_and_key}) {
 				my $standardised_field = $self->{_annotation_data}{standardised_note}{$note_key};
 				if (($standardised_field =~ /\bking/i
-						&& $standardised_field ne 'H M The King') || $standardised_field =~ /de lisle/) {
-					undef;
+						&& $standardised_field ne 'H M The King')) {
+					$logger->warn("Possible mention of the King: $standardised_field");
 				}
 				if ($standardised_field =~ /\(?\?\)?/) {
 					$standardised_field =~ s/\(?\?+\)?//g;
@@ -468,6 +483,7 @@ sub _standardise_punctuation {
 
 sub _fix_known_errors {
 	my ($self) = @_;
+	$logger->trace("_fix_known_errors called");
 	my $annotation = $self->{_annotation_data};
 	my $original_note;
 	if (ref($annotation->{standardised_note}) eq 'HASH') {
@@ -513,7 +529,7 @@ sub _fix_known_errors {
 	elsif ($annotation->{type} eq "unit") {
 		$annotation->{standardised_note}{name} = _unabbreviate_unit_name($annotation->{standardised_note}{name});
 	}
-	elsif ($annotation->{type} eq "person") {
+	elsif ($annotation->{type} eq "person") { # the person field also includes a unit field
 		if ($annotation->{standardised_note}{unit} ne '') {
 			$annotation->{standardised_note}{unit} = _unabbreviate_unit_name($annotation->{standardised_note}{unit});
 		}					
@@ -568,7 +584,7 @@ sub _data_consistent {
 	# ^\d{1,2} [a-z]{3} \d{4}$/ format) maybe we could remove anything inconsistent and save the correct but
 	# incomplete information?
 	my ($self) = @_;
-	print "OWD::Annotation->_data_consistent() called\n" if $debug > 2;
+	$logger->trace("OWD::Annotation->_data_consistent() called");
 	# first check if a 'confirmed' db exists, which can store the results of QA work and list annotations that can be dropped/deleted
 	# after failing QA. If the DB doesn't exist, all annotations are treated equally.
 #	if (ref($self->{_classification}->get_page()->get_diary()->get_processor()->get_confirmed_db()) eq 'MongoDB::Database') {
@@ -590,6 +606,7 @@ sub _data_consistent {
 				'type'		=> 'annotation_error; unexpected_value',
 				'detail'	=> 'doctype \''.$annotation->{note}.'\' not recognised',
 			};
+			$logger->warn("annotation doctype field has invalid value: '",$annotation->{note},"'");
 			$self->data_error($error);
 			return 0;
 		}
@@ -600,6 +617,7 @@ sub _data_consistent {
 					'type'		=> 'annotation_error; unexpected_note_type',
 					'detail'	=> 'person type with no note hash',
 				};
+				$logger->warn("annotation person field is not a hash, as expected",ref($annotation->{note}));
 				$self->data_error($error);
 				return 0;
 			}
@@ -611,6 +629,7 @@ sub _data_consistent {
 					'type'		=> 'annotation_error; missing_mandatory_value',
 					'detail'	=> 'diaryDate has no note field',
 				};
+				$logger->warn("annotation diaryDate field by ", $self->get_classification()->get_classification_user(), " on page ",$self->get_classification()->get_page()->get_page_num(), " does not have a value");
 				$self->data_error($error);
 				return 0;
 			}
@@ -619,6 +638,7 @@ sub _data_consistent {
 					'type'		=> 'annotation_error; invalid diaryDate format',
 					'detail'	=> '\''.$annotation->{note}.'\' doesn\'t match expected date format \'dd mmmm yyyy\'',
 				};
+				$logger->warn("annotation diaryDate value doesn't match expected date format: '",$annotation->{note},"'");
 				$self->data_error($error);
 				return 0;
 			}
@@ -630,6 +650,7 @@ sub _data_consistent {
 					'type'		=> 'annotation_error; missing_mandatory_value',
 					'detail'	=> 'date has no note field',
 				};
+				$logger->warn("annotation date field does not have a value");
 				$self->data_error($error);
 				return 0;
 			}
@@ -648,6 +669,7 @@ sub _data_consistent {
 					'type'		=> 'annotation_error; blank_or_no_note',
 					'detail'	=> '\''.$annotation->{id}.'\' (type \''.$annotation->{type}.'\' has no note value',
 				};
+				$logger->warn("annotation does not have a note value");
 				$self->data_error($error);
 				return 0;
 			}
@@ -659,6 +681,7 @@ sub _data_consistent {
 			'type'		=> 'annotation_error; no type field',
 			'detail'	=> 'annotation without a type',
 		};
+		$logger->warn("annotation doesn't have a type");
 		$self->data_error($error);
 		return 0;
 	}

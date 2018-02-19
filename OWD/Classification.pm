@@ -2,19 +2,26 @@ package OWD::Classification;
 use strict;
 use Data::Dumper;
 use OWD::Annotation;
+use Log::Log4perl;
+
+my $logger = Log::Log4perl->get_logger();
 
 my $debug = 1;
 
 sub new {
-	print "OWD::Classification::new() called\n" if $debug > 2;
+	$logger->trace("OWD::Classification::new() called");
 	my ($class, $_page, $_classification) = @_;
 	my @_annotations;
 	my $classification_obj = bless {}, $class;
 
 	if (!defined $_classification->{user_name}) { # Ensure every classification has a user_name
-		$_classification->{user_name} = "<anonymous>-$_classification->{user_ip}";
+		if (defined $_classification->{user_ip}) {
+			$_classification->{user_name} = "<anonymous>-$_classification->{user_ip}";
+		}
+		else {
+			$_classification->{user_name} = $_classification->{_id};
+		}
 	}
-	
 	$classification_obj->{_page} = $_page;
 	$classification_obj->{_classification_data} = $_classification;
 	$classification_obj->{_num_annotations} = 0;
@@ -39,8 +46,10 @@ sub new {
 			$_classification->{user_agent} = $annotation->{user_agent};
 		}
 		else {
-			print "Processing a page annotation\n" if $debug > 2;
-			my $coord_check_string = _coord_check_string($annotation->{coords});
+			my $coord_check_string = _coord_check_string($annotation->{coords}); # used to spot a bug where an annotation is sometimes listed twice
+			$logger->trace("Processing a page annotation at $coord_check_string");
+			# The OWD::Annotation constructor does some initial checks that the value for various annotation types is valid as well as doing other
+			# tweaks to create a "standardised annotation" (with more chance of consensus) from the raw annotation.
 			my $obj_annotation = OWD::Annotation->new($classification_obj,$annotation);
 			# record the coordinates to enable duplicate checks.
 			if (ref($obj_annotation) eq 'OWD::Annotation') {
@@ -48,6 +57,7 @@ sub new {
 					# a user has managed to log two annotations in exactly the same place. This is likely
 					# a bug and could result in a single user getting two "votes" on what entity is here.
 					# Check if the annotations are identical, and if they are, drop and log.
+					$logger->warn("duplicate annotation found in classification by ", $classification_obj->get_classification_user(), " on page ", $classification_obj->get_page()->get_page_num());
 					if ($obj_annotation->is_identical_to($coord_check->{$coord_check_string})) {
 						my $error = {
 							'type'		=> 'classification_error; duplicate_annotations',
@@ -87,11 +97,14 @@ sub new {
 #					print Dumper $annotation;
 #					undef;
 #				}
+				$logger->trace("Annotation creation failed");
 			}
 		}
+
 		$classification_obj->{_num_annotations}++;
-		print "Annotation object created and added to classification\n" if $debug > 2;
+		$logger->trace("Annotation object created and added to classification");
 	}
+	$logger->trace("  Classification by $_classification->{user_name} ($_classification->{finished_at}): $classification_obj->{_num_annotations} annotations");	
 	delete $_classification->{annotations}; # separate the individual annotations from the classification object
 	my $sorted_annotations = [sort {$a->{_annotation_data}{id} cmp $b->{_annotation_data}{id}} @_annotations];
 	$classification_obj->{_annotations} = $sorted_annotations;
