@@ -106,7 +106,7 @@ sub strip_multiple_classifications_by_single_user {
 		if ($value > 1) {
 			my $best_classification = "";
 			#print "$user has multiple classifications for $self->{_page_data}{zooniverse_id}\n";
-			$coll_log->insert({
+			$coll_log->insert_one({
 				'diary'			=> {
 					'group_id'		=> $self->{_diary}->get_zooniverse_id(),
 					'docref'		=> $self->{_diary}->get_docref(),
@@ -159,7 +159,7 @@ sub strip_multiple_classifications_by_single_user {
 	my $num_classifications_after_strip = $self->num_classifications();
 	if ($num_classifications_before_strip > $num_classifications_after_strip) {
 		my $diff = $num_classifications_before_strip - $num_classifications_after_strip;
-		$coll_log->insert({
+		$coll_log->insert_one({
 			'diary'			=> {
 				'group_id'		=> $self->{_diary}->get_zooniverse_id(),
 				'docref'		=> $self->{_diary}->get_docref(),
@@ -222,6 +222,9 @@ sub get_doctype {
 		carp("get_doctype called on OWD::Page object before annotations have been clustered");
 		return;
 	}
+	if (ref($self->{_clusters}{doctype}[0]) ne "OWD::Cluster") {
+		return;
+	}
 	my $consensus_annotation = $self->{_clusters}{doctype}[0]->get_consensus_annotation();
 	if (ref($consensus_annotation) ne 'OWD::ConsensusAnnotation') {
 		return;
@@ -233,7 +236,12 @@ sub get_doctype {
 
 sub num_classifications {
 	my ($self) = @_;
-	return scalar @{$self->{_classifications}};
+	if (defined $self->{_classifications}) {
+		return scalar @{$self->{_classifications}};
+	}
+	else {
+		return 0;
+	}
 }
 
 sub cluster_tags {

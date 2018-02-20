@@ -39,7 +39,7 @@ my $war_diary_confirmed	= "war_diary_confirmed";
 
 $logger->info("war_diary_server = $war_diary_server\nwar_diary_db_name = $war_diary_db_name\nwar_diary_output_db = $war_diary_output_db\nwar_diary_logging_db = $war_diary_logging_db\nwar_diary_tags = $war_diary_tags\nwar_diary_confirmed = $war_diary_confirmed\n=================\n");
 
-my $client 		= MongoDB::MongoClient->new(host => $war_diary_server,query_timeout => 50000);
+my $client 		= MongoDB->connect("mongodb://$war_diary_server",{"max_time_ms" => 50000});
 my $db 			= $client->get_database($war_diary_db_name);
 my $output_db	= $client->get_database($war_diary_output_db);
 my $logging_db 	= $client->get_database($war_diary_logging_db);
@@ -96,8 +96,8 @@ sub diary_tasks {
 #	}
 	# clear down the log db for this diary ID
 	$logger->trace("Clearing down logging database entries for this diary");
-	$owd->get_logging_db()->get_collection('error')->remove({"diary.group_id" => "$diary_id"});
-	$owd->get_logging_db()->get_collection('log')->remove({"diary.group_id" => "$diary_id"});
+	$owd->get_logging_db()->get_collection('error')->delete_one({"diary.group_id" => "$diary_id"});
+	$owd->get_logging_db()->get_collection('log')->delete_one({"diary.group_id" => "$diary_id"});
 	$logger->info("$diary_count: ",$diary->get_docref()," (",$diary->get_zooniverse_id(),")");
 	if ($diary->get_status() eq "complete") {
 		$logger->debug("  diary has been completed by volunteers. Loading pages.");

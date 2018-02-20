@@ -188,7 +188,7 @@ sub get_zooniverse_id_to_iaid_mapping {
 
 sub data_error {
 	my ($self,$error_hash) = @_;
-	$self->get_error_collection->insert($error_hash);
+	$self->get_error_collection->insert_one($error_hash);
 }
 
 =pod

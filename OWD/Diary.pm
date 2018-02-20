@@ -168,7 +168,7 @@ sub report_pages_with_insufficient_classifications {
 			#print $page->get_zooniverse_id(), " has fewer than $min_classifications classifications (",$page->num_classifications(),")\n";
 			my $logging_db = $self->{_processor}->get_logging_db();
 			my $coll_log = $logging_db->get_collection('log');
-			$coll_log->insert({
+			$coll_log->insert_one({
 				'diary'			=> {
 					'group_id'		=> $self->get_zooniverse_id(),
 					'docref'		=> $self->get_docref(),
@@ -1149,7 +1149,55 @@ sub print_place_report {
 						if (defined $place_ref->{geonames_ids}) {
 							$geonames_ids = join "|", keys %{$place_ref->{geonames_ids}};
 						}
-						print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$place_name\t$place_latlong\t$geonames_ids\r\n";
+						if (defined $title) {
+							print $fh "$title\t";
+						}
+						else {
+							print $fh "\t";
+						}
+						if (defined $page_num) {
+							print $fh "$page_num\t";
+						}
+						else {
+							print $fh "\t";
+						}
+						if (defined $zooniverse_id) {
+							print $fh "$zooniverse_id\t";
+						}
+						else {
+							print $fh "\t";
+						}
+						if (defined $doctype) {
+							print $fh "$doctype\t";
+						}
+						else {
+							print $fh "\t";
+						}
+						if (defined $date) {
+							print $fh "$date\t";
+						}
+						else {
+							print $fh "\t";
+						}
+						if (defined $place_name) {
+							print $fh "$place_name\t";
+						}
+						else {
+							print $fh "\t";
+						}
+						if (defined $place_latlong) {
+							print $fh "$place_latlong\t";
+						}
+						else {
+							print $fh "\t";
+						}
+						if (defined $geonames_ids) {
+							print $fh "$geonames_ids\t";
+						}
+						else {
+							print $fh "\t";
+						}
+						print $fh "\r\n";
 						$logged_for->{$date}{$place_name} = 1;
 					}
 				}
@@ -1211,7 +1259,45 @@ sub print_person_report {
 				my $person_ref;
 				if (my $consensus_person = $person_cluster->get_consensus_annotation()) {
 					my $person_note = $consensus_person->get_note();
-					print $fh "$title\t$page_num\t$date\t$place\t$latlong\t$person_note->{surname}\t$person_note->{first}\t$person_note->{rank}\t$person_note->{reason}\r\n";
+					if (defined $title) {
+						print $fh "$title\t";
+					}
+					else {
+						print "\t";
+					}
+					if (defined $page_num) {
+						print $fh "$page_num\t";
+					}
+					else {
+						print $fh "\t";
+					}
+					if (defined $date) {
+						print $fh "$date\t";
+					}
+					else {
+						print $fh "\t";
+					}
+					if (defined $placename) {
+						print $fh "$placename\t";
+					}
+					else {
+						print $fh "\t";
+					}
+					if (defined $latlong) {
+						print $fh "$latlong\t";
+					}
+					else {
+						print $fh "\t";
+					}
+					foreach my $field (qw/surname first rank reason/) {
+						if (defined $person_note->{$field}) {
+							print $fh "$person_note->{$field}\t";
+						}
+						else {
+							print "\t";
+						}
+					}
+					print $fh "\r\n";
 					#my $person = $consensus_person->get_string_value();
 					#print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$person\t\r\n";
 				}
@@ -1485,7 +1571,7 @@ sub fix_suspect_diaryDates {
 sub publish_to_db {
 	my ($self) = @_;
 	# clear down any existing references to this diary in the DB
-	$self->{_processor}->get_output_db()->get_collection('page')->remove({'group_id' => $self->get_zooniverse_id});
+	$self->{_processor}->get_output_db()->get_collection('page')->delete_one({'group_id' => $self->get_zooniverse_id});
 	foreach my $page (@{$self->{_pages}}) {
 		my $annotations = [];
 		my $output_obj = {
@@ -1519,7 +1605,7 @@ sub publish_to_db {
 			undef;
 		}
 		$output_obj->{annotations} = $annotations;
-		$self->{_processor}->get_output_db()->get_collection('page')->insert($output_obj);
+		$self->{_processor}->get_output_db()->get_collection('page')->insert_one($output_obj);
 	}
 }
 
