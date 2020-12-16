@@ -221,7 +221,7 @@ sub establish_consensus {
 						# for each value with the top (tied) score, add it to an array for the cluster consensus for this field
 						push @{$consensus_annotation->{standardised_note}}, $value if $value_counts->{$value} == $tied_score;
 					}
-					$logger->error("More than one value for a cluster field were tied");
+					$logger->debug("More than one value for a cluster field were tied");
 					$error = {
 						'type'		=> 'cluster_error; value_tie',
 						'detail'	=> "the most popular value for the \'$type\' cluster was a tie of two or more different values",
@@ -242,7 +242,7 @@ sub establish_consensus {
 				foreach my $value (@values) {
 					push @{$consensus_annotation->{standardised_note}}, $value if $value_counts->{$value} == $tied_score;
 				}
-				$logger->error("More than one value for a cluster field were tied");
+				$logger->debug("More than one value for a cluster field were tied");
 				$error = {
 					'type'		=> 'cluster_error; value_tie',
 					'detail'	=> "the most popular value for the \'$type\' cluster was a tie of two or more different values",
@@ -251,7 +251,7 @@ sub establish_consensus {
 			else {
 				# lonely cluster
 				$status_of_field = LONE_USER_SUBMITTED;
-				$logger->error("Lonely annotation cluster");
+				$logger->debug("Lonely $type annotation cluster");
 #				The error state below is already logged at the cluster_tags() stage
 #				$error = {
 #					'type'				=> 'cluster_error; lonely_cluster',
@@ -288,7 +288,8 @@ sub establish_consensus {
 		my $is_lonely_cluster = 0;
 		foreach my $key (keys %$value_counts) {
 			my @values = reverse sort { $value_counts->{$key}{$a} <=> $value_counts->{$key}{$b} } keys %{$value_counts->{$key}};
-			if (@values > 1 && $values[0] eq '') {
+			if (@values > 1 && $values[0] eq '') { # if there are multiple potential values but the most popular is
+				                                   # the empty string, strip that entry to select the most popular non-blank
 				shift @values;
 				delete $value_counts->{$key}{''};
 			}
@@ -334,6 +335,7 @@ sub establish_consensus {
 				}
 				else {
 					$is_lonely_cluster = 1;
+					$consensus_annotation->{standardised_note}{$key} = $values[0];
 					$status_of_field->{$key} = LONE_USER_SUBMITTED;
 				}
 			}

@@ -380,7 +380,7 @@ sub _standardise_punctuation {
 				my $standardised_field = $self->{_annotation_data}{standardised_note}{$note_key};
 				if (($standardised_field =~ /\bking/i
 						&& $standardised_field ne 'H M The King')) {
-					$logger->warn("Possible mention of the King: $standardised_field");
+					$logger->debug("Possible mention of the King: $standardised_field");
 				}
 				if ($standardised_field =~ /\(?\?\)?/) {
 					$standardised_field =~ s/\(?\?+\)?//g;
@@ -629,7 +629,7 @@ sub _data_consistent {
 					'type'		=> 'annotation_error; missing_mandatory_value',
 					'detail'	=> 'diaryDate has no note field',
 				};
-				$logger->warn("annotation diaryDate field by ", $self->get_classification()->get_classification_user(), " on page ",$self->get_classification()->get_page()->get_page_num(), " does not have a value");
+				$logger->trace("annotation diaryDate field by ", $self->get_classification()->get_classification_user(), " on page ",$self->get_classification()->get_page()->get_page_num()," (",$self->get_classification()->get_page()->get_diary()->get_zooniverse_id(),"/",$self->get_classification()->get_page()->get_zooniverse_id(),") does not have a value");
 				$self->data_error($error);
 				return 0;
 			}
@@ -638,7 +638,7 @@ sub _data_consistent {
 					'type'		=> 'annotation_error; invalid diaryDate format',
 					'detail'	=> '\''.$annotation->{note}.'\' doesn\'t match expected date format \'dd mmmm yyyy\'',
 				};
-				$logger->warn("annotation diaryDate value doesn't match expected date format: '",$annotation->{note},"'");
+				$logger->debug("annotation diaryDate value doesn't match expected date format: '",$annotation->{note},"'");
 				$self->data_error($error);
 				return 0;
 			}
@@ -650,7 +650,7 @@ sub _data_consistent {
 					'type'		=> 'annotation_error; missing_mandatory_value',
 					'detail'	=> 'date has no note field',
 				};
-				$logger->warn("annotation date field does not have a value");
+				$logger->trace("annotation date field by ", $self->get_classification()->get_classification_user(), " on page ",$self->get_classification()->get_page()->get_page_num()," (",$self->get_classification()->get_page()->get_diary()->get_zooniverse_id(),"/",$self->get_classification()->get_page()->get_zooniverse_id(),") does not have a value");
 				$self->data_error($error);
 				return 0;
 			}
@@ -669,7 +669,7 @@ sub _data_consistent {
 					'type'		=> 'annotation_error; blank_or_no_note',
 					'detail'	=> '\''.$annotation->{id}.'\' (type \''.$annotation->{type}.'\' has no note value',
 				};
-				$logger->warn("annotation does not have a note value");
+				$logger->trace("annotation type ",$self->get_type()," by ", $self->get_classification()->get_classification_user(), " on page ",$self->get_classification()->get_page()->get_page_num()," (",$self->get_classification()->get_page()->get_diary()->get_zooniverse_id(),"/",$self->get_classification()->get_page()->get_zooniverse_id(),") does not have a note value");
 				$self->data_error($error);
 				return 0;
 			}

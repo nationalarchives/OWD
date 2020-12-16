@@ -30,6 +30,8 @@ my %month = (
 	"Dec" => 12,
 );
 
+my @multivalue_types = qw/time date person casualties gridRef mapRef reference unit/;
+
 sub new {
 	my ($class,$_processor, $_group) = @_;
 	my $_diary = bless {},$class;
@@ -50,7 +52,7 @@ sub new {
 
 sub load_pages {
 	my ($self) = @_;
-	$logger->debug("Loading page data for current diary");
+	$logger->debug("Loading page data for diary ",$self->get_zooniverse_id());
 	my $subjects_ref = [];	# an array of subjects (pages) within the diary, sorted by page number
 	my $cur_subjects = $self->{_processor}->{coll_subjects}->find({"group.zooniverse_id" => $self->get_zooniverse_id()});
 	$cur_subjects->fields({'classification_count'=>1,'group'=>1,'location'=>1,'metadata'=>1,'state'=>1,'zooniverse_id'=>1});
@@ -79,7 +81,7 @@ sub load_classifications {
 		$self->load_pages();
 	}
 	foreach my $page (@{$self->{_pages}}) {
-		$logger->debug("loading classifications for page ", $page->get_page_num()," (",$page->get_zooniverse_id(),")");
+		$logger->trace("loading classifications for page ", $page->get_page_num()," (",$page->get_zooniverse_id(),")");
 		my $return_val = $page->load_classifications();
 		if ($return_val) {
 			$diary_return_val++;
@@ -813,7 +815,7 @@ sub create_place_lookup {
 						elsif (ref($page_place_lookup->{$place_y_coord}) eq 'ARRAY') {
 							# we have at least three dates for this row.
 							# Add the new date to the existing array for dealing with later
-							$logger->warn("Consensus annotation for a place is an array");;
+							$logger->debug("Consensus annotation for a place is an array");;
 							push @{$page_place_lookup->{$place_y_coord}}, $consensus_annotation;
 						}
 					}
@@ -823,7 +825,7 @@ sub create_place_lookup {
 				}
 				else {
 					# no consensus annotation for this place cluster
-					$logger->warn("No consensus annotation for a place cluster");
+					$logger->debug("No consensus annotation for a place cluster");
 				}
 			}
 			my @rows = sort {$a <=> $b} keys %$page_place_lookup;
@@ -897,6 +899,7 @@ sub print_text_report {
 	foreach my $page (@{$self->{_pages}}) {
 		my $doctype		= $page->get_doctype();
 		if (!defined $doctype) {
+			$logger->error("Undefined doctype for page ",$page->get_zooniverse_id);
 			undef;
 		}
 		my $page_num	= $page->get_page_num();
@@ -1237,14 +1240,14 @@ sub print_person_report {
 			if (ref($place) ne "OWD::ConsensusAnnotation") {
 				if (ref($place) eq "ARRAY") {
 					my $selected_place;
-					print "Place options are:\n";
+#					print "Place options are:\n";
 					foreach my $place_option (@$place) {
 						my $coords = $place_option->get_coordinates();
 						# from the array of options, select the one that is leftmost on the page
 						if (!defined $selected_place || $coords->[0] < $selected_place->get_coordinates()->[0]) {
 							$selected_place = $place_option;
 						}
-						print "  (",$coords->[0],",",$coords->[1],") ",$place_option->get_string_value(),"\n";
+#						print "  (",$coords->[0],",",$coords->[1],") ",$place_option->get_string_value(),"\n";
 					}
 					$place = $selected_place;
 				}
@@ -1302,7 +1305,7 @@ sub print_person_report {
 					#print $fh "$title\t$page_num\t$zooniverse_id\t$doctype\t$date\t$person\t\r\n";
 				}
 				else {
-					$logger->warn("No consensus annotation for person");
+					$logger->info("No consensus annotation for person");
 				}
 			}
 		}
@@ -1311,10 +1314,12 @@ sub print_person_report {
 
 sub print_activities_report {
 	my ($self, $fh) = @_;
+	$logger->debug("print_activities_report() called");
 	my $title 		= $self->{_group_data}{name};
 	my $diary_id	= $self->get_zooniverse_id();
-	my $tags_by_date;
+	my $tags_by_date = {};
 	my $all_tags_by_date;
+	$logger->debug("Collating activity tags");
 	foreach my $page (@{$self->{_pages}}) {
 		my $page_num		= $page->get_page_num();
 		my $doctype			= $page->get_doctype(); 
@@ -1323,20 +1328,32 @@ sub print_activities_report {
 			my @hashtags = keys %$hashtags;
 		}
 		foreach my $type (keys %{$page->{_clusters}}) {
-			next if $type eq 'diaryDate' or $type eq 'doctype'; # we've used these to create our date_lookup function already
+			next if $type ne 'activity' and $type ne 'domestic' and $type ne 'orders' and $type ne 'weather'; # we've used these to create our date_lookup function already
 			foreach my $cluster (@{$page->{_clusters}{$type}}) {
-				next if ($cluster->get_type() ne 'activity' && $cluster->get_type() ne 'domestic');
 				my $date = get_date_for($page_num, $cluster->{median_centroid}[1]);
 				my $place = get_place_for($page_num, $cluster->{median_centroid}[1]);
-				$tags_by_date->{$date->{sortable}}{places}{$place}++;
+				if (ref($place) eq 'OWD::ConsensusAnnotation') {
+					$place = $place->get_field('place');
+					$tags_by_date->{$date->{sortable}}{places}{$place}++
+				}
+				elsif (ref($place) eq 'ARRAY') {
+					foreach my $place_option (@$place) {
+						$tags_by_date->{$date->{sortable}}{places}{$place_option->get_field('place')}++;
+					}
+				}
+				else {
+					if ($place ne '') {
+						$tags_by_date->{$date->{sortable}}{places}{$place}++;
+					}
+					else {
+						print "'$place'\n";
+					}
+				}
 				$tags_by_date->{$date->{sortable}}{date} = $date->{friendly};
 				$tags_by_date->{$date->{sortable}}{pages}{$page_num} = {'doctype' => $doctype, 'zooniverse_id' => $zooniverse_id, };
 				if (defined(my $consensus_annotation = $cluster->get_consensus_annotation())) {
 					my $tag = $consensus_annotation->get_type().":".$consensus_annotation->get_note();
 					$tags_by_date->{$date->{sortable}}{tags}{$tag}++;
-				}
-				else {
-					undef;
 				}
 				foreach my $annotation (@{$cluster->{_annotations}}) {
 					my $tag_date = get_date_for($page_num, $annotation->{_annotation_data}{coords}[1]);
@@ -1347,12 +1364,10 @@ sub print_activities_report {
 					$all_tags_by_date->{$tag_date->{sortable}}{pages}{$page_num} = {'doctype' => $doctype, 'zooniverse_id' => $zooniverse_id, };
 					$all_tags_by_date->{$tag_date->{sortable}}{tags}{$tag}++;
 				}
-				undef;
 			}
 		}
-		undef;
 	}
-	open my $ofh, ">", "output-activities/$diary_id.tsv";
+	$logger->debug("Tag collation complete");
 	my @activities = (
 						"activity:achieved",
 						"activity:attack",
@@ -1390,10 +1405,32 @@ sub print_activities_report {
 						"domestic:sport",
 						"domestic:uniform",
 	);
-	print $ofh "#Unit\tDate\tPageNum\tPageID\tPlace1\tPlace2\tPlace3\t";
-	print $ofh join("\t",@activities),"\t";
-	print $ofh join("\t",@domestic);
-	print $ofh "\n";
+	my @weather = (
+						"weather:fine",
+						"weather:rain",
+						"weather:cold",
+						"weather:overcast",
+						"weather:hot",
+						"weather:fog",
+						"weather:other",
+	);
+	my @orders = (
+		"orders:move",
+		"orders:attack",
+		"orders:other",
+		"orders:routine",
+		"orders:entrench",
+		"orders:training",
+		"orders:standing",
+		"orders:withdraw",
+	);
+	print $fh "#Unit\tDate\tPageNum\tPageID\tPlace1\tPlace2\tPlace3\t";
+	print $fh join("\t",@activities),"\t";
+	print $fh join("\t",@domestic),"\t";
+	print $fh join("\t",@weather),"\t";
+	print $fh join("\t",@orders);
+	print $fh "\n";
+	$logger->trace("Iterating through tags in ascending order of date");
 	foreach my $date (sort keys %$tags_by_date) {
 		my @pages = sort {$a <=> $b} keys %{$tags_by_date->{$date}{pages}};
 		my @page_ids = ();
@@ -1405,35 +1442,56 @@ sub print_activities_report {
 			print "$friendly_date is undefined\n";
 			print Dumper $tags_by_date->{$date};
 		}
-		print $ofh "$title\t$friendly_date\t@pages\t@page_ids\t";
+		print $fh "$title\t$friendly_date\t@pages\t@page_ids\t";
 		my @places = sort keys %{$tags_by_date->{$date}{places}};
 		for (my $i=0; $i<3; $i++) {
-			if (defined $places[$i]) {
-				print $ofh "$places[$i]\t";
+			if (defined $places[$i] && $places[$i] ne '') {
+				my $place_note = $places[$i];
+				if (ref($place_note) eq 'OWD::ConsensusAnnotation') {
+					print Dumper $place_note;
+					$place_note = $place_note->get_note();
+				}
+				print $fh "$place_note\t";
 			}
 			else {
-				print $ofh "\t";
+				print $fh "\t";
 			}
 		}
 		foreach my $tag_type (@activities) {
 			if (defined($tags_by_date->{$date}{tags}{$tag_type})) {
-				print $ofh "$tags_by_date->{$date}{tags}{$tag_type}\t";
+				print $fh "$tags_by_date->{$date}{tags}{$tag_type}\t";
 			}
 			else {
-				print $ofh "\t";
+				print $fh "\t";
 			}
 		}
 		foreach my $tag_type (@domestic) {
 			if (defined($tags_by_date->{$date}{tags}{$tag_type})) {
-				print $ofh "$tags_by_date->{$date}{tags}{$tag_type}\t";
+				print $fh "$tags_by_date->{$date}{tags}{$tag_type}\t";
 			}
 			else {
-				print $ofh "\t";
+				print $fh "\t";
 			}
 		}
-		print $ofh "\n";
+		foreach my $tag_type (@weather) {
+			if (defined($tags_by_date->{$date}{tags}{$tag_type})) {
+				print $fh "$tags_by_date->{$date}{tags}{$tag_type}\t";
+			}
+			else {
+				print $fh "\t";
+			}
+		}
+		foreach my $tag_type (@orders) {
+			if (defined($tags_by_date->{$date}{tags}{$tag_type})) {
+				print $fh "$tags_by_date->{$date}{tags}{$tag_type}\t";
+			}
+			else {
+				print $fh "\t";
+			}
+		}
+		print $fh "\n";
 	}
-	close $ofh;
+=for
 	undef $tags_by_date;
 	open $ofh, ">", "output_all-tags/$diary_id.tsv";
 	print $ofh "#Unit\tDate\tPageNum\tPageID\tPlace1\tPlace2\tPlace3\t";
@@ -1509,6 +1567,24 @@ sub print_activities_report {
 #			}
 #		}
 #	}
+=cut
+}
+
+sub populate_tag_inventory {
+	my ($self,$tags) = @_;
+	foreach my $page (@{$self->{_pages}}) {
+		foreach my $type (keys %{$page->{_clusters}}) {
+			next if $type eq 'diaryDate' or $type eq 'doctype' or $type eq 'place'; # we've used these to create our date_lookup function already
+			foreach my $cluster (@{$page->{_clusters}{$type}}) {
+				$tags->{$type}{count}++;
+				next if List::Util::any {$type eq $_} @multivalue_types;
+				if (my $consensus_annotation = $cluster->get_consensus_annotation()) {
+					$tags->{$type}{values}{$consensus_annotation->get_note()}++;
+				}
+			}
+		}
+	}
+	return $tags;
 }
 
 sub resolve_uncertainty {
