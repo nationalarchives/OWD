@@ -57,7 +57,7 @@ sub new {
 					# a user has managed to log two annotations in exactly the same place. This is likely
 					# a bug and could result in a single user getting two "votes" on what entity is here.
 					# Check if the annotations are identical, and if they are, drop and log.
-					$logger->warn("duplicate annotation found in classification by ", $classification_obj->get_classification_user(), " on page ", $classification_obj->get_page()->get_page_num());
+					$logger->trace("duplicate annotation found in classification by ", $classification_obj->get_classification_user(), " on page ", $classification_obj->get_page()->get_page_num()," (",$classification_obj->get_page()->get_diary()->get_zooniverse_id(),"/",$classification_obj->get_page()->get_zooniverse_id());
 					if ($obj_annotation->is_identical_to($coord_check->{$coord_check_string})) {
 						my $error = {
 							'type'		=> 'classification_error; duplicate_annotations',

@@ -42,7 +42,7 @@ sub load_classifications {
 		while (my $classification = $cur_classifications->next) {
 			push @$_classifications, OWD::Classification->new($self,$classification);
 		}
-		$logger->debug("  Completed iterating through classifications. ",scalar(@$_classifications)," classifications found");
+		$logger->trace("  Completed iterating through classifications. ",scalar(@$_classifications)," classifications found");
 		my $sorted_classifications = [sort {$a->{_classification_data}{user_name} cmp $b->{_classification_data}{user_name}} @$_classifications];
 		$self->{_classifications} = $sorted_classifications;
 		undef $cur_classifications;

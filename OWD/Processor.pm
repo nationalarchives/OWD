@@ -31,6 +31,9 @@ sub set_database {
 		if ($cur_groups->has_next) {
 			$logger->trace("  iterating...");
 			while (my $group = $cur_groups->next) {
+				if (ref $group->{metadata}{start_date} ne "DateTime") {
+					$logger->warn("Invalid date format in record $group->{zooniverse_id}");
+				}
 				push @$groups_ref, $group;
 			}
 			$logger->trace("  complete...");
